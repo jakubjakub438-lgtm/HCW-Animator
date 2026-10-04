@@ -1,0 +1,17 @@
+AUTOMATICKE ZOSTAVENIE WINDOWS EXE (BEZ PYTHONU NA VASOM POCITACI)
+
+Toto NIE JE hotovy .exe. Je to balik, ktory sa zostavi na Windows serveri GitHub Actions.
+
+1. Prihlaste sa na github.com a vytvorte sukromny repozitar (Private repository).
+2. Nahrajte do neho subory hcw_animator.py, requirements.txt a cely adresar .github/workflows/ z tohto balika.
+   Pozor: pri nahravani cez web zachovajte strukturu adresarov; pripadne pouzite GitHub Desktop.
+3. V repozitari otvorte zalozku Actions -> Build Windows EXE -> Run workflow.
+   Workflow sa spusti aj po nahrati suborov do vetvy main.
+4. Po uspesnom dokonceni v detaile behu najdete Artifacts -> HCW_Animator_Windows_EXE.
+5. Stiahnite ZIP s HCW_Animator.exe, rozbalte ho a dvojklikom spustite EXE.
+
+Na lokalnom pocitaci nie je potrebny Python.
+
+UPOZORNENIE: V tomto prostredi nie je dostupne zostavenie ani spustenie Windows EXE.
+Preto skutocne fungovanie EXE aj novych HCW scen vyzaduje test na Windows.
+Sukromny repozitar pouzite preto, aby zdrojovy kod nebol verejny.
