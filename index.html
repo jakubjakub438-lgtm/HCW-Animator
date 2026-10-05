@@ -23,48 +23,58 @@ const openButton = document.getElementById("openButton");
 const status = document.getElementById("status");
 
 
-function getHCWValue(element, tagName) {
-
-    const node = element.getElementsByTagName(tagName)[0];
-
-    return node ? node.textContent.trim() : "";
-}
-
-
-function getDirectHCWValue(element, tagName) {
-
+function directValue(element, tagName, defaultValue = "") {
     for (const child of element.children) {
-
         if (child.tagName === tagName) {
             return child.textContent.trim();
         }
     }
-
-    return "";
+    return defaultValue;
 }
 
 
-function getContainerValues(element, containerName) {
+function objectEvents(element) {
 
-    const values = [];
+    const result = [];
 
     for (const child of element.children) {
 
-        if (child.tagName !== containerName) {
+        if (child.tagName !== "ObjectEvents") {
             continue;
         }
 
-        for (const item of child.children) {
+        for (const event of child.children) {
 
-            const value = item.textContent.trim();
-
-            if (value) {
-                values.push(value);
+            if (event.tagName !== "OnOffEvent") {
+                continue;
             }
+
+            const sequenceText =
+                directValue(event, "sequence", "0");
+
+            const activeText =
+                directValue(event, "active", "false");
+
+            const disabledText =
+                directValue(event, "disabledRotators", "");
+
+            const sequence =
+                Number.parseInt(sequenceText, 10);
+
+            result.push({
+                sequence:
+                    Number.isNaN(sequence) ? 0 : sequence,
+
+                active:
+                    activeText.toLowerCase() === "true",
+
+                disabledRotators:
+                    disabledText
+            });
         }
     }
 
-    return values;
+    return result;
 }
 
 
@@ -73,23 +83,17 @@ openButton.addEventListener("click", async () => {
     const file = hcwFile.files[0];
 
     if (!file) {
-
         status.textContent = "Najprv vyber HCW súbor.";
-
         return;
     }
-
 
     try {
 
         const content = await file.text();
 
-
         if (content.length === 0) {
-
             status.textContent =
                 "CHYBA: HCW súbor je prázdny.";
-
             return;
         }
 
@@ -103,15 +107,9 @@ openButton.addEventListener("click", async () => {
             );
 
 
-        const parseError =
-            xml.querySelector("parsererror");
-
-
-        if (parseError) {
-
+        if (xml.querySelector("parsererror")) {
             status.textContent =
                 "CHYBA: HCW súbor sa nepodarilo rozpoznať ako XML.";
-
             return;
         }
 
@@ -131,83 +129,60 @@ openButton.addEventListener("click", async () => {
         const timeNumbers =
             xml.getElementsByTagName("TimeNumber");
 
-        const onOffEvents =
+        const allOnOffEvents =
             xml.getElementsByTagName("OnOffEvent");
 
 
-        const characterCount =
-            characters.length;
-
-        const cameraCount =
-            cameras.length;
-
-        const walkArrowCount =
-            walkArrows.length;
-
-        const trackCount =
-            tracks.length;
-
-        const timeNumberCount =
-            timeNumbers.length;
-
-        const onOffEventCount =
-            onOffEvents.length;
-
-
-
         /*
-        ==========================================
+        ========================================
         CHARACTER DATA
-        ==========================================
+        ========================================
         */
 
         let characterData = "";
 
 
-        for (
-            let i = 0;
-            i < characters.length;
-            i++
-        ) {
+        for (let i = 0; i < characters.length; i++) {
 
-            const character =
-                characters[i];
-
+            const character = characters[i];
 
             const characterID =
-                getHCWValue(
-                    character,
-                    "uniqueID"
-                );
+                directValue(character, "uniqueID");
 
             const characterX =
-                getHCWValue(
-                    character,
-                    "x"
-                );
+                directValue(character, "x");
 
             const characterY =
-                getHCWValue(
-                    character,
-                    "y"
-                );
+                directValue(character, "y");
 
             const characterColor =
-                getHCWValue(
-                    character,
-                    "color"
-                );
+                directValue(character, "color");
 
             const characterColorName =
-                getHCWValue(
-                    character,
-                    "colorName"
+                directValue(character, "colorName");
+
+
+            const subObjects =
+                Array.from(character.children)
+                .find(
+                    child =>
+                        child.tagName === "SubObjects"
                 );
+
+
+            const rotators = subObjects
+                ? Array.from(subObjects.children)
+                    .filter(
+                        child =>
+                            child.tagName ===
+                            "RotatorCharacter"
+                    )
+                : [];
 
 
             characterData +=
-                "<br><br>" +
-                "<strong>Character " +
+
+                "<br><br><strong>Character " +
                 (i + 1) +
                 "</strong><br>" +
 
@@ -229,31 +204,14 @@ openButton.addEventListener("click", async () => {
 
                 "ColorName: " +
                 characterColorName +
-                "<br>";
+                "<br>" +
 
-
-
-            const rotators =
-                character.getElementsByTagName(
-                    "RotatorCharacter"
-                );
-
-
-            characterData +=
                 "<strong>RotatorCharacter: " +
                 rotators.length +
                 "</strong><br>";
 
 
-            for (
-                let r = 0;
-                r < rotators.length;
-                r++
-            ) {
-
-                const rotator =
-                    rotators[r];
-
+            for (let r = 0; r < rotators.length; r++) {
 
                 characterData +=
 
@@ -262,15 +220,15 @@ openButton.addEventListener("click", async () => {
                     "<br>" +
 
                     "ID: " +
-                    getHCWValue(
-                        rotator,
+                    directValue(
+                        rotators[r],
                         "uniqueID"
                     ) +
                     "<br>" +
 
                     "Angle: " +
-                    getHCWValue(
-                        rotator,
+                    directValue(
+                        rotators[r],
                         "angle"
                     ) +
                     "<br>";
@@ -278,141 +236,120 @@ openButton.addEventListener("click", async () => {
         }
 
 
-
         /*
-        ==========================================
+        ========================================
         SITUATION -> CHARACTER -> ROTATOR
-        ==========================================
+        ========================================
         */
 
         let situationData = "";
 
-
         situationData +=
-
-            "<br><br>" +
-
-            "<strong>" +
+            "<br><br><strong>" +
             "SITUÁCIA → CHARACTER → AKTÍVNY ROTATOR" +
             "</strong><br>";
 
 
-
-        /*
-        V HCW je OnOffEvent súčasťou objektu,
-        ku ktorému patrí.
-
-        Preto nehľadáme objectID vo vnútri
-        samotného OnOffEvent.
-
-        Pre každý Character čítame jeho
-        vlastné OnOffEvent.
-        */
+        const situations = new Map();
 
 
-        for (
-            let c = 0;
-            c < characters.length;
-            c++
-        ) {
+        for (const character of characters) {
 
-            const character =
-                characters[c];
+            const events =
+                objectEvents(character);
+
+
+            /*
+            Character bez ObjectEvents je template,
+            nie časovaný scene state.
+            */
+
+            if (events.length === 0) {
+                continue;
+            }
 
 
             const characterID =
-                getDirectHCWValue(
+                directValue(
                     character,
                     "uniqueID"
                 );
 
 
-            if (!characterID) {
-                continue;
-            }
-
-
-            const rotators =
-                character.getElementsByTagName(
-                    "RotatorCharacter"
+            const characterX =
+                directValue(
+                    character,
+                    "x"
                 );
 
 
-            const characterEvents =
-                character.getElementsByTagName(
-                    "OnOffEvent"
+            const characterY =
+                directValue(
+                    character,
+                    "y"
                 );
 
 
-            for (
-                let e = 0;
-                e < characterEvents.length;
-                e++
-            ) {
-
-                const event =
-                    characterEvents[e];
+            const colorName =
+                directValue(
+                    character,
+                    "colorName"
+                );
 
 
-                const seqText =
-                    getDirectHCWValue(
-                        event,
-                        "seq"
-                    );
+            const subObjects =
+                Array.from(character.children)
+                .find(
+                    child =>
+                        child.tagName === "SubObjects"
+                );
 
 
-                const active =
-                    getDirectHCWValue(
-                        event,
-                        "active"
-                    );
+            const rotators = subObjects
+                ? Array.from(subObjects.children)
+                    .filter(
+                        child =>
+                            child.tagName ===
+                            "RotatorCharacter"
+                    )
+                : [];
 
 
-                if (seqText === "") {
+            for (const event of events) {
+
+                if (!event.active) {
                     continue;
                 }
 
 
-                if (active !== "true") {
-                    continue;
+                if (!situations.has(event.sequence)) {
+                    situations.set(
+                        event.sequence,
+                        []
+                    );
                 }
 
 
-                const disabledRotators =
-                    getContainerValues(
-                        event,
-                        "disabledRotators"
-                    );
+                const disabledIDs =
+                    event.disabledRotators
+                        .split(/[\s,;]+/)
+                        .filter(Boolean);
 
 
-                let activeRotatorID = "";
-                let activeAngle = "";
+                const activeRotators = [];
 
 
-                for (
-                    let r = 0;
-                    r < rotators.length;
-                    r++
-                ) {
-
-                    const rotator =
-                        rotators[r];
-
+                for (const rotator of rotators) {
 
                     const rotatorID =
-                        getDirectHCWValue(
+                        directValue(
                             rotator,
                             "uniqueID"
                         );
 
 
-                    if (!rotatorID) {
-                        continue;
-                    }
-
-
                     if (
-                        disabledRotators.includes(
+                        disabledIDs.includes(
                             rotatorID
                         )
                     ) {
@@ -420,53 +357,121 @@ openButton.addEventListener("click", async () => {
                     }
 
 
-                    activeRotatorID =
-                        rotatorID;
-
-
-                    activeAngle =
-                        getDirectHCWValue(
-                            rotator,
-                            "angle"
-                        );
-
-
-                    break;
+                    activeRotators.push({
+                        id: rotatorID,
+                        angle:
+                            directValue(
+                                rotator,
+                                "angle"
+                            )
+                    });
                 }
 
+
+                situations.get(event.sequence).push({
+
+                    characterID:
+                        characterID,
+
+                    x:
+                        characterX,
+
+                    y:
+                        characterY,
+
+                    colorName:
+                        colorName,
+
+                    disabledRotators:
+                        event.disabledRotators,
+
+                    activeRotators:
+                        activeRotators
+                });
+            }
+        }
+
+
+        const sortedSequences =
+            Array.from(situations.keys())
+                .sort((a, b) => a - b);
+
+
+        for (const sequence of sortedSequences) {
+
+            situationData +=
+                "<br><br><strong>SITUÁCIA " +
+                sequence +
+                "</strong><br>";
+
+
+            const states =
+                situations.get(sequence);
+
+
+            for (const state of states) {
 
                 situationData +=
 
                     "<br>" +
 
-                    "<strong>SITUÁCIA " +
-                    seqText +
-                    "</strong><br>" +
-
                     "Character: " +
-                    characterID +
+                    state.characterID +
                     "<br>" +
 
-                    "Active: " +
-                    active +
+                    "X: " +
+                    state.x +
                     "<br>" +
 
-                    "RotatorCharacter: " +
-                    activeRotatorID +
+                    "Y: " +
+                    state.y +
                     "<br>" +
 
-                    "Angle: " +
-                    activeAngle +
+                    "ColorName: " +
+                    state.colorName +
+                    "<br>" +
+
+                    "DisabledRotators: " +
+                    state.disabledRotators +
                     "<br>";
+
+
+                if (
+                    state.activeRotators.length === 0
+                ) {
+
+                    situationData +=
+                        "Aktívny RotatorCharacter: NONE<br>";
+
+                } else {
+
+                    for (
+                        let r = 0;
+                        r < state.activeRotators.length;
+                        r++
+                    ) {
+
+                        situationData +=
+
+                            "Aktívny RotatorCharacter " +
+                            (r + 1) +
+                            ": " +
+                            state.activeRotators[r].id +
+                            "<br>" +
+
+                            "Angle: " +
+                            state.activeRotators[r].angle +
+                            "<br>";
+                    }
+                }
             }
         }
 
 
-
         /*
-        ==========================================
+        ========================================
         OUTPUT
-        ==========================================
+        ========================================
         */
 
 
@@ -480,27 +485,27 @@ openButton.addEventListener("click", async () => {
             "<strong>HCW ŠTRUKTÚRA:</strong><br>" +
 
             "Character: " +
-            characterCount +
+            characters.length +
             "<br>" +
 
             "Camera: " +
-            cameraCount +
+            cameras.length +
             "<br>" +
 
             "WalkArrow: " +
-            walkArrowCount +
+            walkArrows.length +
             "<br>" +
 
             "Track: " +
-            trackCount +
+            tracks.length +
             "<br>" +
 
             "TimeNumber: " +
-            timeNumberCount +
+            timeNumbers.length +
             "<br>" +
 
             "OnOffEvent: " +
-            onOffEventCount +
+            allOnOffEvents.length +
 
             "<br><br>" +
 
