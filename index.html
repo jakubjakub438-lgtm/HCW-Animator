@@ -54,21 +54,43 @@ const characters = xml.getElementsByTagName("Character");
 
 let characterData = "";
 
-for (let i = 0; i < characters.length; i++) {
-    const character = characters[i];
-
-   const getHCWValue = (element, tagName) => {
+const getHCWValue = (element, tagName) => {
     const node = element.getElementsByTagName(tagName)[0];
     return node ? node.textContent.trim() : "";
 };
 
-characterData +=
-    "<br><br><strong>Character " + (i + 1) + "</strong><br>" +
-    "ID: " + getHCWValue(character, "uniqueID") + "<br>" +
-    "X: " + getHCWValue(character, "x") + "<br>" +
-    "Y: " + getHCWValue(character, "y") + "<br>" +
-    "Color: " + getHCWValue(character, "color") + "<br>" +
-    "ColorName: " + getHCWValue(character, "colorName");
+for (let i = 0; i < characters.length; i++) {
+
+    const character = characters[i];
+
+    const characterID = getHCWValue(character, "uniqueID");
+    const characterX = getHCWValue(character, "x");
+    const characterY = getHCWValue(character, "y");
+    const characterColor = getHCWValue(character, "color");
+    const characterColorName = getHCWValue(character, "colorName");
+
+    characterData +=
+        "<br><br><strong>Character " + (i + 1) + "</strong><br>" +
+        "ID: " + characterID + "<br>" +
+        "X: " + characterX + "<br>" +
+        "Y: " + characterY + "<br>" +
+        "Color: " + characterColor + "<br>" +
+        "ColorName: " + characterColorName + "<br>";
+
+    const rotators = character.getElementsByTagName("RotatorCharacter");
+
+    characterData +=
+        "<strong>RotatorCharacter: " + rotators.length + "</strong><br>";
+
+    for (let r = 0; r < rotators.length; r++) {
+
+        const rotator = rotators[r];
+
+        characterData +=
+            "Rotator " + (r + 1) + "<br>" +
+            "ID: " + getHCWValue(rotator, "uniqueID") + "<br>" +
+            "Angle: " + getHCWValue(rotator, "angle") + "<br>";
+    }
 }
 
 status.innerHTML =
