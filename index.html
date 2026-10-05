@@ -92,7 +92,51 @@ for (let i = 0; i < characters.length; i++) {
             "Angle: " + getHCWValue(rotator, "angle") + "<br>";
     }
 }
+const onOffEvents = xml.getElementsByTagName("OnOffEvent");
 
+let onOffData = "";
+
+onOffData +=
+    "<br><br><strong>ON/OFF EVENT DATA:</strong><br>" +
+    "OnOffEvent: " + onOffEvents.length + "<br>";
+
+for (let e = 0; e < onOffEvents.length; e++) {
+
+    const event = onOffEvents[e];
+
+    const eventID = getHCWValue(event, "uniqueID");
+    const active = getHCWValue(event, "active");
+
+    const timeNumberNodes = event.getElementsByTagName("TimeNumber");
+    const objectIDNodes = event.getElementsByTagName("objectID");
+    const disabledRotatorNodes = event.getElementsByTagName("disabledRotators");
+
+    onOffData +=
+        "<br><strong>OnOffEvent " + (e + 1) + "</strong><br>" +
+        "ID: " + eventID + "<br>" +
+        "Active: " + active + "<br>";
+
+    for (let t = 0; t < timeNumberNodes.length; t++) {
+        onOffData +=
+            "TimeNumber: " +
+            timeNumberNodes[t].textContent.trim() +
+            "<br>";
+    }
+
+    for (let o = 0; o < objectIDNodes.length; o++) {
+        onOffData +=
+            "ObjectID: " +
+            objectIDNodes[o].textContent.trim() +
+            "<br>";
+    }
+
+    for (let d = 0; d < disabledRotatorNodes.length; d++) {
+        onOffData +=
+            "DisabledRotators: " +
+            disabledRotatorNodes[d].textContent.trim() +
+            "<br>";
+    }
+}
 status.innerHTML =
     "HCW súbor bol úspešne prečítaný: " + file.name +
     "<br><br>" +
@@ -103,7 +147,8 @@ status.innerHTML =
     "Track: " + trackCount + "<br>" +
     "TimeNumber: " + timeNumberCount +
     "<br><br><strong>CHARACTER DATA:</strong>" +
-    characterData;
+    characterData +
+onOffData;
     } catch (error) {
         status.textContent = "CHYBA: HCW súbor sa nepodarilo prečítať.";
     }
