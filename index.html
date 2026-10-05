@@ -13,5 +13,37 @@
     <button id="openButton">OTVORIŤ HCW</button>
 
     <p id="status">HCW súbor zatiaľ nie je otvorený.</p>
+    <script>
+const hcwFile = document.getElementById("hcwFile");
+const openButton = document.getElementById("openButton");
+const status = document.getElementById("status");
+
+openButton.addEventListener("click", async () => {
+    const file = hcwFile.files[0];
+
+    if (!file) {
+        status.textContent = "Najprv vyber HCW súbor.";
+        return;
+    }
+
+    try {
+        const content = await file.text();
+
+        if (content.length === 0) {
+            status.textContent = "CHYBA: HCW súbor je prázdny.";
+            return;
+        }
+
+        status.textContent =
+            "HCW súbor bol úspešne prečítaný: " +
+            file.name +
+            " (" +
+            content.length +
+            " znakov)";
+    } catch (error) {
+        status.textContent = "CHYBA: HCW súbor sa nepodarilo prečítať.";
+    }
+});
+</script>
 </body>
 </html>
