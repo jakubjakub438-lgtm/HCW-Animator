@@ -27,7 +27,7 @@ jobs:
 
       - name: Build HCW Animator EXE
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name HCW_Animator hcw_animator.py
+          pyinstaller --noconfirm --clean --onefile --name HCW_Animator hcw_animator.py
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
