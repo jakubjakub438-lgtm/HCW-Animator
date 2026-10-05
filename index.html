@@ -50,6 +50,21 @@ const walkArrowCount = xml.getElementsByTagName("WalkArrow").length;
 const trackCount = xml.getElementsByTagName("Track").length;
 const timeNumberCount = xml.getElementsByTagName("TimeNumber").length;
 
+const characters = xml.getElementsByTagName("Character");
+
+let characterData = "";
+
+for (let i = 0; i < characters.length; i++) {
+    const character = characters[i];
+
+    characterData +=
+        "<br><br><strong>Character " + (i + 1) + "</strong><br>" +
+        "ID: " + character.getAttribute("id") + "<br>" +
+        "X: " + character.getAttribute("x") + "<br>" +
+        "Y: " + character.getAttribute("y") + "<br>" +
+        "Color: " + character.getAttribute("color");
+}
+
 status.innerHTML =
     "HCW súbor bol úspešne prečítaný: " + file.name +
     "<br><br>" +
@@ -58,7 +73,9 @@ status.innerHTML =
     "Camera: " + cameraCount + "<br>" +
     "WalkArrow: " + walkArrowCount + "<br>" +
     "Track: " + trackCount + "<br>" +
-    "TimeNumber: " + timeNumberCount;
+    "TimeNumber: " + timeNumberCount +
+    "<br><br><strong>CHARACTER DATA:</strong>" +
+    characterData;
     } catch (error) {
         status.textContent = "CHYBA: HCW súbor sa nepodarilo prečítať.";
     }
