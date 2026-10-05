@@ -5,154 +5,523 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HCW Animator</title>
 </head>
+
 <body>
-    <h1>HCW Animator</h1>
-    <p>Webová verzia HCW Animatora.</p>
 
-    <input type="file" id="hcwFile" accept=".hcw">
-    <button id="openButton">OTVORIŤ HCW</button>
+<h1>HCW Animator</h1>
+<p>Webová verzia HCW Animatora.</p>
 
-    <p id="status">HCW súbor zatiaľ nie je otvorený.</p>
-    <script>
+<input type="file" id="hcwFile" accept=".hcw">
+<button id="openButton">OTVORIŤ HCW</button>
+
+<p id="status">HCW súbor zatiaľ nie je otvorený.</p>
+
+<script>
+
 const hcwFile = document.getElementById("hcwFile");
 const openButton = document.getElementById("openButton");
 const status = document.getElementById("status");
 
+
+function getHCWValue(element, tagName) {
+
+    const node = element.getElementsByTagName(tagName)[0];
+
+    return node ? node.textContent.trim() : "";
+}
+
+
+function getDirectHCWValue(element, tagName) {
+
+    for (const child of element.children) {
+
+        if (child.tagName === tagName) {
+            return child.textContent.trim();
+        }
+    }
+
+    return "";
+}
+
+
+function getContainerValues(element, containerName) {
+
+    const values = [];
+
+    for (const child of element.children) {
+
+        if (child.tagName !== containerName) {
+            continue;
+        }
+
+        for (const item of child.children) {
+
+            const value = item.textContent.trim();
+
+            if (value) {
+                values.push(value);
+            }
+        }
+    }
+
+    return values;
+}
+
+
 openButton.addEventListener("click", async () => {
+
     const file = hcwFile.files[0];
 
     if (!file) {
+
         status.textContent = "Najprv vyber HCW súbor.";
+
         return;
     }
 
+
     try {
+
         const content = await file.text();
 
+
         if (content.length === 0) {
-            status.textContent = "CHYBA: HCW súbor je prázdny.";
+
+            status.textContent =
+                "CHYBA: HCW súbor je prázdny.";
+
             return;
         }
 
+
         const parser = new DOMParser();
-const xml = parser.parseFromString(content, "text/xml");
 
-const parseError = xml.querySelector("parsererror");
+        const xml =
+            parser.parseFromString(
+                content,
+                "text/xml"
+            );
 
-if (parseError) {
-    status.textContent = "CHYBA: HCW súbor sa nepodarilo rozpoznať ako XML.";
-    return;
-}
 
-const characterCount = xml.getElementsByTagName("Character").length;
-const cameraCount = xml.getElementsByTagName("Camera").length;
-const walkArrowCount = xml.getElementsByTagName("WalkArrow").length;
-const trackCount = xml.getElementsByTagName("Track").length;
-const timeNumberCount = xml.getElementsByTagName("TimeNumber").length;
+        const parseError =
+            xml.querySelector("parsererror");
 
-const characters = xml.getElementsByTagName("Character");
 
-let characterData = "";
+        if (parseError) {
 
-const getHCWValue = (element, tagName) => {
-    const node = element.getElementsByTagName(tagName)[0];
-    return node ? node.textContent.trim() : "";
-};
+            status.textContent =
+                "CHYBA: HCW súbor sa nepodarilo rozpoznať ako XML.";
 
-for (let i = 0; i < characters.length; i++) {
+            return;
+        }
 
-    const character = characters[i];
 
-    const characterID = getHCWValue(character, "uniqueID");
-    const characterX = getHCWValue(character, "x");
-    const characterY = getHCWValue(character, "y");
-    const characterColor = getHCWValue(character, "color");
-    const characterColorName = getHCWValue(character, "colorName");
+        const characters =
+            xml.getElementsByTagName("Character");
 
-    characterData +=
-        "<br><br><strong>Character " + (i + 1) + "</strong><br>" +
-        "ID: " + characterID + "<br>" +
-        "X: " + characterX + "<br>" +
-        "Y: " + characterY + "<br>" +
-        "Color: " + characterColor + "<br>" +
-        "ColorName: " + characterColorName + "<br>";
+        const cameras =
+            xml.getElementsByTagName("Camera");
 
-    const rotators = character.getElementsByTagName("RotatorCharacter");
+        const walkArrows =
+            xml.getElementsByTagName("WalkArrow");
 
-    characterData +=
-        "<strong>RotatorCharacter: " + rotators.length + "</strong><br>";
+        const tracks =
+            xml.getElementsByTagName("Track");
 
-    for (let r = 0; r < rotators.length; r++) {
+        const timeNumbers =
+            xml.getElementsByTagName("TimeNumber");
 
-        const rotator = rotators[r];
+        const onOffEvents =
+            xml.getElementsByTagName("OnOffEvent");
 
-        characterData +=
-            "Rotator " + (r + 1) + "<br>" +
-            "ID: " + getHCWValue(rotator, "uniqueID") + "<br>" +
-            "Angle: " + getHCWValue(rotator, "angle") + "<br>";
-    }
-}
-const onOffEvents = xml.getElementsByTagName("OnOffEvent");
 
-let onOffData = "";
+        const characterCount =
+            characters.length;
 
-onOffData +=
-    "<br><br><strong>ON/OFF EVENT DATA:</strong><br>" +
-    "OnOffEvent: " + onOffEvents.length + "<br>";
+        const cameraCount =
+            cameras.length;
 
-for (let e = 0; e < onOffEvents.length; e++) {
+        const walkArrowCount =
+            walkArrows.length;
 
-    const event = onOffEvents[e];
+        const trackCount =
+            tracks.length;
 
-    const eventID = getHCWValue(event, "uniqueID");
-    const active = getHCWValue(event, "active");
+        const timeNumberCount =
+            timeNumbers.length;
 
-    const timeNumberNodes = event.getElementsByTagName("TimeNumber");
-    const objectIDNodes = event.getElementsByTagName("objectID");
-    const disabledRotatorNodes = event.getElementsByTagName("disabledRotators");
+        const onOffEventCount =
+            onOffEvents.length;
 
-    onOffData +=
-        "<br><strong>OnOffEvent " + (e + 1) + "</strong><br>" +
-        "ID: " + eventID + "<br>" +
-        "Active: " + active + "<br>";
 
-    for (let t = 0; t < timeNumberNodes.length; t++) {
-        onOffData +=
+
+        /*
+        ==========================================
+        CHARACTER DATA
+        ==========================================
+        */
+
+        let characterData = "";
+
+
+        for (
+            let i = 0;
+            i < characters.length;
+            i++
+        ) {
+
+            const character =
+                characters[i];
+
+
+            const characterID =
+                getHCWValue(
+                    character,
+                    "uniqueID"
+                );
+
+            const characterX =
+                getHCWValue(
+                    character,
+                    "x"
+                );
+
+            const characterY =
+                getHCWValue(
+                    character,
+                    "y"
+                );
+
+            const characterColor =
+                getHCWValue(
+                    character,
+                    "color"
+                );
+
+            const characterColorName =
+                getHCWValue(
+                    character,
+                    "colorName"
+                );
+
+
+            characterData +=
+                "<br><br>" +
+                "<strong>Character " +
+                (i + 1) +
+                "</strong><br>" +
+
+                "ID: " +
+                characterID +
+                "<br>" +
+
+                "X: " +
+                characterX +
+                "<br>" +
+
+                "Y: " +
+                characterY +
+                "<br>" +
+
+                "Color: " +
+                characterColor +
+                "<br>" +
+
+                "ColorName: " +
+                characterColorName +
+                "<br>";
+
+
+
+            const rotators =
+                character.getElementsByTagName(
+                    "RotatorCharacter"
+                );
+
+
+            characterData +=
+                "<strong>RotatorCharacter: " +
+                rotators.length +
+                "</strong><br>";
+
+
+            for (
+                let r = 0;
+                r < rotators.length;
+                r++
+            ) {
+
+                const rotator =
+                    rotators[r];
+
+
+                characterData +=
+
+                    "Rotator " +
+                    (r + 1) +
+                    "<br>" +
+
+                    "ID: " +
+                    getHCWValue(
+                        rotator,
+                        "uniqueID"
+                    ) +
+                    "<br>" +
+
+                    "Angle: " +
+                    getHCWValue(
+                        rotator,
+                        "angle"
+                    ) +
+                    "<br>";
+            }
+        }
+
+
+
+        /*
+        ==========================================
+        SITUATION -> CHARACTER -> ROTATOR
+        ==========================================
+        */
+
+        let situationData = "";
+
+
+        situationData +=
+
+            "<br><br>" +
+
+            "<strong>" +
+            "SITUÁCIA → CHARACTER → AKTÍVNY ROTATOR" +
+            "</strong><br>";
+
+
+
+        /*
+        V HCW je OnOffEvent súčasťou objektu,
+        ku ktorému patrí.
+
+        Preto nehľadáme objectID vo vnútri
+        samotného OnOffEvent.
+
+        Pre každý Character čítame jeho
+        vlastné OnOffEvent.
+        */
+
+
+        for (
+            let c = 0;
+            c < characters.length;
+            c++
+        ) {
+
+            const character =
+                characters[c];
+
+
+            const characterID =
+                getDirectHCWValue(
+                    character,
+                    "uniqueID"
+                );
+
+
+            if (!characterID) {
+                continue;
+            }
+
+
+            const rotators =
+                character.getElementsByTagName(
+                    "RotatorCharacter"
+                );
+
+
+            const characterEvents =
+                character.getElementsByTagName(
+                    "OnOffEvent"
+                );
+
+
+            for (
+                let e = 0;
+                e < characterEvents.length;
+                e++
+            ) {
+
+                const event =
+                    characterEvents[e];
+
+
+                const seqText =
+                    getDirectHCWValue(
+                        event,
+                        "seq"
+                    );
+
+
+                const active =
+                    getDirectHCWValue(
+                        event,
+                        "active"
+                    );
+
+
+                if (seqText === "") {
+                    continue;
+                }
+
+
+                if (active !== "true") {
+                    continue;
+                }
+
+
+                const disabledRotators =
+                    getContainerValues(
+                        event,
+                        "disabledRotators"
+                    );
+
+
+                let activeRotatorID = "";
+                let activeAngle = "";
+
+
+                for (
+                    let r = 0;
+                    r < rotators.length;
+                    r++
+                ) {
+
+                    const rotator =
+                        rotators[r];
+
+
+                    const rotatorID =
+                        getDirectHCWValue(
+                            rotator,
+                            "uniqueID"
+                        );
+
+
+                    if (!rotatorID) {
+                        continue;
+                    }
+
+
+                    if (
+                        disabledRotators.includes(
+                            rotatorID
+                        )
+                    ) {
+                        continue;
+                    }
+
+
+                    activeRotatorID =
+                        rotatorID;
+
+
+                    activeAngle =
+                        getDirectHCWValue(
+                            rotator,
+                            "angle"
+                        );
+
+
+                    break;
+                }
+
+
+                situationData +=
+
+                    "<br>" +
+
+                    "<strong>SITUÁCIA " +
+                    seqText +
+                    "</strong><br>" +
+
+                    "Character: " +
+                    characterID +
+                    "<br>" +
+
+                    "Active: " +
+                    active +
+                    "<br>" +
+
+                    "RotatorCharacter: " +
+                    activeRotatorID +
+                    "<br>" +
+
+                    "Angle: " +
+                    activeAngle +
+                    "<br>";
+            }
+        }
+
+
+
+        /*
+        ==========================================
+        OUTPUT
+        ==========================================
+        */
+
+
+        status.innerHTML =
+
+            "HCW súbor bol úspešne prečítaný: " +
+            file.name +
+
+            "<br><br>" +
+
+            "<strong>HCW ŠTRUKTÚRA:</strong><br>" +
+
+            "Character: " +
+            characterCount +
+            "<br>" +
+
+            "Camera: " +
+            cameraCount +
+            "<br>" +
+
+            "WalkArrow: " +
+            walkArrowCount +
+            "<br>" +
+
+            "Track: " +
+            trackCount +
+            "<br>" +
+
             "TimeNumber: " +
-            timeNumberNodes[t].textContent.trim() +
-            "<br>";
-    }
+            timeNumberCount +
+            "<br>" +
 
-    for (let o = 0; o < objectIDNodes.length; o++) {
-        onOffData +=
-            "ObjectID: " +
-            objectIDNodes[o].textContent.trim() +
-            "<br>";
-    }
+            "OnOffEvent: " +
+            onOffEventCount +
 
-    for (let d = 0; d < disabledRotatorNodes.length; d++) {
-        onOffData +=
-            "DisabledRotators: " +
-            disabledRotatorNodes[d].textContent.trim() +
-            "<br>";
-    }
-}
-status.innerHTML =
-    "HCW súbor bol úspešne prečítaný: " + file.name +
-    "<br><br>" +
-    "<strong>HCW ŠTRUKTÚRA:</strong><br>" +
-    "Character: " + characterCount + "<br>" +
-    "Camera: " + cameraCount + "<br>" +
-    "WalkArrow: " + walkArrowCount + "<br>" +
-    "Track: " + trackCount + "<br>" +
-    "TimeNumber: " + timeNumberCount +
-    "<br><br><strong>CHARACTER DATA:</strong>" +
-    characterData +
-onOffData;
+            "<br><br>" +
+
+            "<strong>CHARACTER DATA:</strong>" +
+
+            characterData +
+
+            situationData;
+
+
     } catch (error) {
-        status.textContent = "CHYBA: HCW súbor sa nepodarilo prečítať.";
+
+        status.textContent =
+            "CHYBA: HCW súbor sa nepodarilo prečítať.";
+
+        console.error(error);
     }
+
 });
+
 </script>
+
 </body>
 </html>
