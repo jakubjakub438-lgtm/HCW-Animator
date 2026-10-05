@@ -57,12 +57,18 @@ let characterData = "";
 for (let i = 0; i < characters.length; i++) {
     const character = characters[i];
 
-    characterData +=
-        "<br><br><strong>Character " + (i + 1) + "</strong><br>" +
-        "ID: " + character.getAttribute("id") + "<br>" +
-        "X: " + character.getAttribute("x") + "<br>" +
-        "Y: " + character.getAttribute("y") + "<br>" +
-        "Color: " + character.getAttribute("color");
+   const getHCWValue = (element, tagName) => {
+    const node = element.getElementsByTagName(tagName)[0];
+    return node ? node.textContent.trim() : "";
+};
+
+characterData +=
+    "<br><br><strong>Character " + (i + 1) + "</strong><br>" +
+    "ID: " + getHCWValue(character, "uniqueID") + "<br>" +
+    "X: " + getHCWValue(character, "x") + "<br>" +
+    "Y: " + getHCWValue(character, "y") + "<br>" +
+    "Color: " + getHCWValue(character, "color") + "<br>" +
+    "ColorName: " + getHCWValue(character, "colorName");
 }
 
 status.innerHTML =
