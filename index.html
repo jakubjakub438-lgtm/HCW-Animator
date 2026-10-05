@@ -34,12 +34,31 @@ openButton.addEventListener("click", async () => {
             return;
         }
 
-        status.textContent =
-            "HCW súbor bol úspešne prečítaný: " +
-            file.name +
-            " (" +
-            content.length +
-            " znakov)";
+        const parser = new DOMParser();
+const xml = parser.parseFromString(content, "text/xml");
+
+const parseError = xml.querySelector("parsererror");
+
+if (parseError) {
+    status.textContent = "CHYBA: HCW súbor sa nepodarilo rozpoznať ako XML.";
+    return;
+}
+
+const characterCount = xml.getElementsByTagName("Character").length;
+const cameraCount = xml.getElementsByTagName("Camera").length;
+const walkArrowCount = xml.getElementsByTagName("WalkArrow").length;
+const trackCount = xml.getElementsByTagName("Track").length;
+const timeNumberCount = xml.getElementsByTagName("TimeNumber").length;
+
+status.innerHTML =
+    "HCW súbor bol úspešne prečítaný: " + file.name +
+    "<br><br>" +
+    "<strong>HCW ŠTRUKTÚRA:</strong><br>" +
+    "Character: " + characterCount + "<br>" +
+    "Camera: " + cameraCount + "<br>" +
+    "WalkArrow: " + walkArrowCount + "<br>" +
+    "Track: " + trackCount + "<br>" +
+    "TimeNumber: " + timeNumberCount;
     } catch (error) {
         status.textContent = "CHYBA: HCW súbor sa nepodarilo prečítať.";
     }
