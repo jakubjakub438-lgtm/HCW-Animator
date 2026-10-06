@@ -1,76 +1,161 @@
 <!DOCTYPE html>
 <html lang="sk">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HCW Animator</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>HCW Animator</title>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 30px;
+        background: #f4f4f4;
+        color: #111;
+    }
+
+    h1 {
+        margin-bottom: 4px;
+    }
+
+    .panel {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-top: 20px;
+    }
+
+    button {
+        padding: 10px 18px;
+        margin-left: 10px;
+        cursor: pointer;
+    }
+
+    #status {
+        margin-top: 20px;
+        font-weight: bold;
+    }
+
+    pre {
+        background: #111;
+        color: #eee;
+        padding: 20px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        border-radius: 8px;
+    }
+
+    .ok {
+        color: #087a27;
+    }
+
+    .error {
+        color: #b00020;
+    }
+</style>
 </head>
 
 <body>
 
 <h1>HCW Animator</h1>
-<p>Webová verzia HCW Animatora.</p>
+<div>Shot Designer HCW → Web</div>
 
-<input type="file" id="hcwFile" accept=".hcw">
-<button id="openButton">OTVORIŤ HCW</button>
+<div class="panel">
 
-<p id="status">HCW súbor zatiaľ nie je otvorený.</p>
+    <input
+        type="file"
+        id="hcwFile"
+        accept=".hcw,.HCW"
+    >
+
+    <button id="openButton">
+        OTVORIŤ HCW
+    </button>
+
+    <div id="status">
+        Vyber HCW súbor.
+    </div>
+
+</div>
+
+<div class="panel">
+    <pre id="output"></pre>
+</div>
+
 
 <script>
 
-const hcwFile = document.getElementById("hcwFile");
-const openButton = document.getElementById("openButton");
-const status = document.getElementById("status");
+/*
+============================================================
+SHOT DESIGNER HCW -> WEB
+============================================================
+
+ZDROJ LOGIKY:
+
+ShotDesigner_HCW_to_Blender_v2_0_UNIVERSAL.py
+
+PRAVIDLO:
+
+TECHNICKÝ PREPIS - BEZ INTERPRETÁCIE.
+
+Žiadne scene-specific súradnice.
+Žiadne ručné mená hercov.
+Žiadne domýšľanie spojení.
+
+============================================================
+*/
 
 
-function directValue(element, tagName, defaultValue = "") {
-    for (const child of element.children) {
-        if (child.tagName === tagName) {
-            return child.textContent.trim();
+/*
+============================================================
+XML HELPERS
+Python:
+
+T(e, tag)
+F(e, tag)
+============================================================
+*/
+
+
+function directChild(element, tagName) {
+
+    if (!element) {
+        return null;
+    }
+
+    for (let i = 0; i < element.childNodes.length; i++) {
+
+        const node = element.childNodes[i];
+
+        if (
+            node.nodeType === 1 &&
+            node.nodeName === tagName
+        ) {
+            return node;
         }
     }
-    return defaultValue;
+
+    return null;
 }
 
 
-function objectEvents(element) {
+function directChildren(element, tagName) {
 
     const result = [];
 
-    for (const child of element.children) {
+    if (!element) {
+        return result;
+    }
 
-        if (child.tagName !== "ObjectEvents") {
-            continue;
-        }
+    for (let i = 0; i < element.childNodes.length; i++) {
 
-        for (const event of child.children) {
+        const node = element.childNodes[i];
 
-            if (event.tagName !== "OnOffEvent") {
-                continue;
-            }
-
-            const sequenceText =
-                directValue(event, "sequence", "0");
-
-            const activeText =
-                directValue(event, "active", "false");
-
-            const disabledText =
-                directValue(event, "disabledRotators", "");
-
-            const sequence =
-                Number.parseInt(sequenceText, 10);
-
-            result.push({
-                sequence:
-                    Number.isNaN(sequence) ? 0 : sequence,
-
-                active:
-                    activeText.toLowerCase() === "true",
-
-                disabledRotators:
-                    disabledText
-            });
+        if (
+            node.nodeType === 1 &&
+            node.nodeName === tagName
+        ) {
+            result.push(node);
         }
     }
 
@@ -78,453 +163,2144 @@ function objectEvents(element) {
 }
 
 
-openButton.addEventListener("click", async () => {
+function T(element, tagName, defaultValue = "") {
 
-    const file = hcwFile.files[0];
+    const node = directChild(element, tagName);
 
-    if (!file) {
-        status.textContent = "Najprv vyber HCW súbor.";
-        return;
+    if (!node) {
+        return defaultValue;
     }
 
-    try {
+    if (node.textContent === null) {
+        return defaultValue;
+    }
 
-        const content = await file.text();
+    return node.textContent.trim();
+}
 
-        if (content.length === 0) {
-            status.textContent =
-                "CHYBA: HCW súbor je prázdny.";
-            return;
+
+function F(element, tagName, defaultValue = 0.0) {
+
+    const value = Number(
+        T(element, tagName, String(defaultValue))
+    );
+
+    return Number.isFinite(value)
+        ? value
+        : Number(defaultValue);
+}
+
+
+/*
+============================================================
+OBJECT EVENTS
+Python equivalent:
+
+def object_events(e):
+    q = e.find("ObjectEvents")
+    if q is None:
+        return []
+
+    for z in q.findall("OnOffEvent"):
+        seq = int(T(z,"sequence","0"))
+        active = T(z,"active","false").lower()=="true"
+============================================================
+*/
+
+
+function objectEvents(element) {
+
+    const q = directChild(
+        element,
+        "ObjectEvents"
+    );
+
+    if (!q) {
+        return [];
+    }
+
+    const out = [];
+
+    const events = directChildren(
+        q,
+        "OnOffEvent"
+    );
+
+    for (const z of events) {
+
+        let sequence =
+            parseInt(
+                T(z, "sequence", "0"),
+                10
+            );
+
+        if (!Number.isFinite(sequence)) {
+            sequence = 0;
         }
 
+        const active =
+            T(
+                z,
+                "active",
+                "false"
+            ).toLowerCase() === "true";
 
-        const parser = new DOMParser();
+        out.push({
+            sequence,
+            active
+        });
+    }
 
-        const xml =
-            parser.parseFromString(
-                content,
-                "text/xml"
+    return out;
+}
+
+
+/*
+============================================================
+FIRST TRUE SEQUENCE
+============================================================
+*/
+
+
+function firstTrueSeq(element, defaultValue = 0) {
+
+    const vals =
+        objectEvents(element)
+        .filter(event => event.active)
+        .map(event => event.sequence);
+
+    if (vals.length === 0) {
+        return defaultValue;
+    }
+
+    return Math.min(...vals);
+}
+
+
+/*
+============================================================
+ANGLE
+Python:
+
+e.find("SubObjects/" + subtag + "/angle")
+============================================================
+*/
+
+
+function angleOf(element, subtag) {
+
+    const subObjects =
+        directChild(
+            element,
+            "SubObjects"
+        );
+
+    if (!subObjects) {
+        return 0.0;
+    }
+
+    const rotator =
+        directChild(
+            subObjects,
+            subtag
+        );
+
+    if (!rotator) {
+        return 0.0;
+    }
+
+    const angle =
+        Number(
+            T(
+                rotator,
+                "angle",
+                "0"
+            )
+        );
+
+    return Number.isFinite(angle)
+        ? angle
+        : 0.0;
+}
+
+
+/*
+============================================================
+CHARACTER SIGNATURE
+Python:
+
+(colorName, colorIndex, female)
+============================================================
+*/
+
+
+function charSignature(element) {
+
+    return [
+        T(element, "colorName"),
+        T(element, "colorIndex"),
+        T(element, "female")
+    ].join("|");
+}
+
+
+/*
+============================================================
+CLEAN CAPTION TEXT
+============================================================
+*/
+
+
+function cleanText(text) {
+
+    if (!text) {
+        return "";
+    }
+
+    return text
+        .replace(/<br\s*\/?>/gi, " ")
+        .replace(/<[^>]+>/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+
+/*
+============================================================
+PARSE HCW
+JavaScript equivalent of parse_hcw()
+============================================================
+*/
+
+
+function parseHCW(xml) {
+
+    const root =
+        xml.documentElement;
+
+    const snapshot =
+        directChild(
+            root,
+            "CurrentSnapshot"
+        );
+
+    if (!snapshot) {
+        throw new Error(
+            "HCW nemá CurrentSnapshot."
+        );
+    }
+
+
+    const canvas =
+        directChild(
+            snapshot,
+            "Canvas"
+        );
+
+    const timeSlices =
+        directChild(
+            snapshot,
+            "TimeSlices"
+        );
+
+
+    if (!canvas || !timeSlices) {
+        throw new Error(
+            "HCW nemá Canvas alebo TimeSlices."
+        );
+    }
+
+
+    /*
+    ---------------------------
+    TIME SEQUENCES
+    ---------------------------
+    */
+
+    const sequences =
+        directChildren(
+            timeSlices,
+            "TimeNumber"
+        )
+        .map(
+            t =>
+                parseInt(
+                    T(t, "sequence", "0"),
+                    10
+                )
+        )
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+
+
+    /*
+    ---------------------------
+    CHARACTERS
+    ---------------------------
+    */
+
+    const chars =
+        directChildren(
+            canvas,
+            "Character"
+        );
+
+
+    const sceneStates =
+        chars.filter(
+            e =>
+                objectEvents(e).length > 0
+        );
+
+
+    const templates =
+        chars.filter(
+            e =>
+                objectEvents(e).length === 0
+        );
+
+
+    /*
+    ---------------------------
+    OTHER HCW OBJECTS
+    ---------------------------
+    */
+
+    const walks =
+        directChildren(
+            canvas,
+            "WalkArrow"
+        );
+
+
+    const cameras =
+        directChildren(
+            canvas,
+            "Camera"
+        );
+
+
+    const tracks =
+        directChildren(
+            canvas,
+            "Track"
+        );
+
+
+    const props =
+        directChildren(
+            canvas,
+            "GenericProp"
+        );
+
+
+    const lights =
+        directChildren(
+            canvas,
+            "GenericLight"
+        );
+
+
+    const captions =
+        directChildren(
+            canvas,
+            "Caption"
+        );
+
+
+    const background =
+        directChild(
+            canvas,
+            "Background"
+        );
+
+
+    /*
+    ---------------------------
+    PICTURES
+    ---------------------------
+    */
+
+    const pictures = new Map();
+
+    const picturesRoot =
+        directChild(
+            root,
+            "Pictures"
+        );
+
+
+    if (picturesRoot) {
+
+        const pictureList =
+            directChildren(
+                picturesRoot,
+                "Picture"
+            );
+
+        for (const picture of pictureList) {
+
+            pictures.set(
+                T(picture, "uniqueID"),
+                T(picture, "base64Data")
+            );
+        }
+    }
+
+
+    return {
+
+        root,
+        snapshot,
+        canvas,
+
+        sequences,
+
+        sceneStates,
+        templates,
+
+        walks,
+        cameras,
+        tracks,
+
+        props,
+        lights,
+        captions,
+
+        background,
+        pictures
+    };
+}
+
+
+/*
+============================================================
+LOGICAL ACTOR RECONSTRUCTION
+
+Equivalent of:
+
+build_actor_components(data)
+
+Actor identity is reconstructed from:
+
+1. timed Character states
+2. WalkArrow graph
+3. template Character signature
+4. Caption attachObjectID
+
+============================================================
+*/
+
+
+function buildActorComponents(data) {
+
+    const states =
+        data.sceneStates;
+
+
+    const byId =
+        new Map();
+
+
+    for (const state of states) {
+
+        byId.set(
+            T(state, "uniqueID"),
+            state
+        );
+    }
+
+
+    const stateIDs =
+        new Set(
+            byId.keys()
+        );
+
+
+    /*
+    ---------------------------
+    WALKARROW GRAPH
+    ---------------------------
+    */
+
+
+    const adjacency =
+        new Map();
+
+
+    for (const uid of stateIDs) {
+
+        adjacency.set(
+            uid,
+            new Set()
+        );
+    }
+
+
+    const actorWalks = [];
+
+
+    for (const walk of data.walks) {
+
+        const a =
+            T(
+                walk,
+                "fromConstraints"
+            );
+
+        const b =
+            T(
+                walk,
+                "toConstraints"
             );
 
 
-        if (xml.querySelector("parsererror")) {
-            status.textContent =
-                "CHYBA: HCW súbor sa nepodarilo rozpoznať ako XML.";
-            return;
+        if (
+            stateIDs.has(a) &&
+            stateIDs.has(b)
+        ) {
+
+            adjacency.get(a).add(b);
+            adjacency.get(b).add(a);
+
+            actorWalks.push(walk);
+        }
+    }
+
+
+    /*
+    ---------------------------
+    CONNECTED COMPONENTS
+    ---------------------------
+    */
+
+
+    const components = [];
+
+    const seen =
+        new Set();
+
+
+    for (const uid of stateIDs) {
+
+        if (seen.has(uid)) {
+            continue;
         }
 
 
-        const characters =
-            xml.getElementsByTagName("Character");
+        const queue = [uid];
 
-        const cameras =
-            xml.getElementsByTagName("Camera");
+        seen.add(uid);
 
-        const walkArrows =
-            xml.getElementsByTagName("WalkArrow");
-
-        const tracks =
-            xml.getElementsByTagName("Track");
-
-        const timeNumbers =
-            xml.getElementsByTagName("TimeNumber");
-
-        const allOnOffEvents =
-            xml.getElementsByTagName("OnOffEvent");
+        const component = [];
 
 
-        /*
-        ========================================
-        CHARACTER DATA
-        ========================================
-        */
+        while (queue.length > 0) {
 
-        let characterData = "";
+            const current =
+                queue.pop();
 
-
-        for (let i = 0; i < characters.length; i++) {
-
-            const character = characters[i];
-
-            const characterID =
-                directValue(character, "uniqueID");
-
-            const characterX =
-                directValue(character, "x");
-
-            const characterY =
-                directValue(character, "y");
-
-            const characterColor =
-                directValue(character, "color");
-
-            const characterColorName =
-                directValue(character, "colorName");
+            component.push(
+                current
+            );
 
 
-            const subObjects =
-                Array.from(character.children)
-                .find(
-                    child =>
-                        child.tagName === "SubObjects"
-                );
+            for (
+                const next
+                of adjacency.get(current)
+            ) {
 
+                if (!seen.has(next)) {
 
-            const rotators = subObjects
-                ? Array.from(subObjects.children)
-                    .filter(
-                        child =>
-                            child.tagName ===
-                            "RotatorCharacter"
-                    )
-                : [];
+                    seen.add(next);
 
-
-            characterData +=
-
-                "<br><br><strong>Character " +
-                (i + 1) +
-                "</strong><br>" +
-
-                "ID: " +
-                characterID +
-                "<br>" +
-
-                "X: " +
-                characterX +
-                "<br>" +
-
-                "Y: " +
-                characterY +
-                "<br>" +
-
-                "Color: " +
-                characterColor +
-                "<br>" +
-
-                "ColorName: " +
-                characterColorName +
-                "<br>" +
-
-                "<strong>RotatorCharacter: " +
-                rotators.length +
-                "</strong><br>";
-
-
-            for (let r = 0; r < rotators.length; r++) {
-
-                characterData +=
-
-                    "Rotator " +
-                    (r + 1) +
-                    "<br>" +
-
-                    "ID: " +
-                    directValue(
-                        rotators[r],
-                        "uniqueID"
-                    ) +
-                    "<br>" +
-
-                    "Angle: " +
-                    directValue(
-                        rotators[r],
-                        "angle"
-                    ) +
-                    "<br>";
+                    queue.push(next);
+                }
             }
         }
 
 
+        components.push(
+            component
+        );
+    }
+
+
+    /*
+    ---------------------------
+    CAPTION NAMES
+    ---------------------------
+    */
+
+
+    const captionName =
+        new Map();
+
+
+    for (
+        const caption
+        of data.captions
+    ) {
+
+        const attachID =
+            T(
+                caption,
+                "attachObjectID"
+            );
+
+
+        const text =
+            cleanText(
+                T(
+                    caption,
+                    "userText"
+                )
+            );
+
+
+        if (
+            attachID &&
+            text
+        ) {
+
+            captionName.set(
+                attachID,
+                text
+            );
+        }
+    }
+
+
+    /*
+    ---------------------------
+    TEMPLATES BY SIGNATURE
+    ---------------------------
+    */
+
+
+    const templatesBySignature =
+        new Map();
+
+
+    for (
+        const template
+        of data.templates
+    ) {
+
+        const signature =
+            charSignature(
+                template
+            );
+
+
+        if (
+            !templatesBySignature.has(
+                signature
+            )
+        ) {
+
+            templatesBySignature.set(
+                signature,
+                []
+            );
+        }
+
+
+        templatesBySignature
+            .get(signature)
+            .push(template);
+    }
+
+
+    /*
+    ---------------------------
+    BUILD ACTORS
+    ---------------------------
+    */
+
+
+    const actors = [];
+
+    const usedNames =
+        new Map();
+
+
+    let componentIndex = 0;
+
+
+    for (
+        const component
+        of components
+    ) {
+
+        componentIndex++;
+
+
+        const elements =
+            component.map(
+                uid =>
+                    byId.get(uid)
+            );
+
+
+        const signature =
+            charSignature(
+                elements[0]
+            );
+
+
+        const matches =
+            templatesBySignature.get(
+                signature
+            ) || [];
+
+
+        let name = null;
+
+
+        if (
+            matches.length === 1
+        ) {
+
+            name =
+                captionName.get(
+                    T(
+                        matches[0],
+                        "uniqueID"
+                    )
+                ) || null;
+        }
+
+
         /*
-        ========================================
-        SITUATION -> CHARACTER -> ROTATOR
-        ========================================
+        Same fallback as Python parser.
         */
 
-        let situationData = "";
 
-        situationData +=
-            "<br><br><strong>" +
-            "SITUÁCIA → CHARACTER → AKTÍVNY ROTATOR" +
-            "</strong><br>";
+        if (!name) {
 
-
-        const situations = new Map();
-
-
-        for (const character of characters) {
-
-            const events =
-                objectEvents(character);
+            const base =
+                T(
+                    elements[0],
+                    "colorName",
+                    "Character"
+                ) || "Character";
 
 
-            /*
-            Character bez ObjectEvents je template,
-            nie časovaný scene state.
-            */
+            const count =
+                (usedNames.get(base) || 0)
+                + 1;
 
-            if (events.length === 0) {
+
+            usedNames.set(
+                base,
+                count
+            );
+
+
+            name =
+                base +
+                "_" +
+                count;
+        }
+
+
+        /*
+        WalkArrows belonging to this actor.
+        */
+
+
+        const componentSet =
+            new Set(
+                component
+            );
+
+
+        const walkList = [];
+
+
+        for (
+            const walk
+            of actorWalks
+        ) {
+
+            const from =
+                T(
+                    walk,
+                    "fromConstraints"
+                );
+
+
+            const to =
+                T(
+                    walk,
+                    "toConstraints"
+                );
+
+
+            if (
+                componentSet.has(from) &&
+                componentSet.has(to)
+            ) {
+
+                walkList.push(
+                    walk
+                );
+            }
+        }
+
+
+        actors.push({
+
+            name,
+
+            stateIDs:
+                component,
+
+            states:
+                elements,
+
+            walks:
+                walkList,
+
+            signature
+        });
+    }
+
+
+    return actors;
+}
+
+
+/*
+============================================================
+WALK POINTS
+
+Python:
+
+[from state XY]
++
+ALL stored WalkArrow Points
++
+[to state XY]
+
+Nothing is simplified.
+============================================================
+*/
+
+
+function walkPoints(
+    walk,
+    stateById
+) {
+
+    const a =
+        stateById.get(
+            T(
+                walk,
+                "fromConstraints"
+            )
+        );
+
+
+    const b =
+        stateById.get(
+            T(
+                walk,
+                "toConstraints"
+            )
+        );
+
+
+    if (!a || !b) {
+        return [];
+    }
+
+
+    const points = [
+
+        {
+            x: F(a, "x"),
+            y: F(a, "y")
+        }
+
+    ];
+
+
+    const pointsNode =
+        directChild(
+            walk,
+            "Points"
+        );
+
+
+    if (pointsNode) {
+
+        const storedPoints =
+            directChildren(
+                pointsNode,
+                "Point"
+            );
+
+
+        for (
+            const point
+            of storedPoints
+        ) {
+
+            points.push({
+
+                x:
+                    F(
+                        point,
+                        "x"
+                    ),
+
+                y:
+                    F(
+                        point,
+                        "y"
+                    )
+            });
+        }
+    }
+
+
+    points.push({
+
+        x: F(b, "x"),
+        y: F(b, "y")
+    });
+
+
+    return points;
+}
+
+
+/*
+============================================================
+ACTOR TIMELINE DATA
+
+This corresponds to the already proven import logic:
+
+initial state =
+earliest TRUE ObjectEvent
+
+WalkArrow movement interval =
+sequence immediately before target state
+→ target state sequence
+============================================================
+*/
+
+
+function buildActorTimeline(
+    data,
+    actors
+) {
+
+    const stateById =
+        new Map();
+
+
+    for (
+        const state
+        of data.sceneStates
+    ) {
+
+        stateById.set(
+            T(
+                state,
+                "uniqueID"
+            ),
+            state
+        );
+    }
+
+
+    const result = [];
+
+
+    for (
+        const actor
+        of actors
+    ) {
+
+        /*
+        Initial physical state.
+        */
+
+
+        const states =
+            [...actor.states];
+
+
+        states.sort(
+            (a, b) =>
+                firstTrueSeq(a, 999) -
+                firstTrueSeq(b, 999)
+        );
+
+
+        const initial =
+            states[0];
+
+
+        /*
+        WalkArrow chronological order
+        from target state sequence.
+        */
+
+
+        const walks =
+            [...actor.walks];
+
+
+        walks.sort(
+            (a, b) => {
+
+                const targetA =
+                    stateById.get(
+                        T(
+                            a,
+                            "toConstraints"
+                        )
+                    );
+
+
+                const targetB =
+                    stateById.get(
+                        T(
+                            b,
+                            "toConstraints"
+                        )
+                    );
+
+
+                return (
+                    firstTrueSeq(
+                        targetA,
+                        999
+                    )
+                    -
+                    firstTrueSeq(
+                        targetB,
+                        999
+                    )
+                );
+            }
+        );
+
+
+        const movements = [];
+
+
+        for (
+            const walk
+            of walks
+        ) {
+
+            const fromState =
+                stateById.get(
+                    T(
+                        walk,
+                        "fromConstraints"
+                    )
+                );
+
+
+            const toState =
+                stateById.get(
+                    T(
+                        walk,
+                        "toConstraints"
+                    )
+                );
+
+
+            if (
+                !fromState ||
+                !toState
+            ) {
                 continue;
             }
 
 
-            const characterID =
-                directValue(
-                    character,
-                    "uniqueID"
+            const endSequence =
+                firstTrueSeq(
+                    toState,
+                    0
                 );
 
 
-            const characterX =
-                directValue(
-                    character,
-                    "x"
+            const startSequence =
+                Math.max(
+                    0,
+                    endSequence - 1
                 );
 
 
-            const characterY =
-                directValue(
-                    character,
-                    "y"
-                );
+            movements.push({
 
+                walkID:
+                    T(
+                        walk,
+                        "uniqueID"
+                    ),
 
-            const colorName =
-                directValue(
-                    character,
-                    "colorName"
-                );
+                fromID:
+                    T(
+                        fromState,
+                        "uniqueID"
+                    ),
 
+                toID:
+                    T(
+                        toState,
+                        "uniqueID"
+                    ),
 
-            const subObjects =
-                Array.from(character.children)
-                .find(
-                    child =>
-                        child.tagName === "SubObjects"
-                );
+                startSequence,
 
+                endSequence,
 
-            const rotators = subObjects
-                ? Array.from(subObjects.children)
-                    .filter(
-                        child =>
-                            child.tagName ===
-                            "RotatorCharacter"
+                endAngle:
+                    angleOf(
+                        toState,
+                        "RotatorCharacter"
+                    ),
+
+                points:
+                    walkPoints(
+                        walk,
+                        stateById
                     )
-                : [];
+            });
+        }
 
 
-            for (const event of events) {
+        result.push({
 
-                if (!event.active) {
-                    continue;
-                }
+            name:
+                actor.name,
 
+            initial: {
 
-                if (!situations.has(event.sequence)) {
-                    situations.set(
-                        event.sequence,
-                        []
-                    );
-                }
+                stateID:
+                    T(
+                        initial,
+                        "uniqueID"
+                    ),
 
+                sequence:
+                    firstTrueSeq(
+                        initial,
+                        0
+                    ),
 
-                const disabledIDs =
-                    event.disabledRotators
-                        .split(/[\s,;]+/)
-                        .filter(Boolean);
+                x:
+                    F(
+                        initial,
+                        "x"
+                    ),
 
+                y:
+                    F(
+                        initial,
+                        "y"
+                    ),
 
-                const activeRotators = [];
+                angle:
+                    angleOf(
+                        initial,
+                        "RotatorCharacter"
+                    )
+            },
 
-
-                for (const rotator of rotators) {
-
-                    const rotatorID =
-                        directValue(
-                            rotator,
-                            "uniqueID"
-                        );
-
-
-                    if (
-                        disabledIDs.includes(
-                            rotatorID
-                        )
-                    ) {
-                        continue;
-                    }
-
-
-                    activeRotators.push({
-                        id: rotatorID,
-                        angle:
-                            directValue(
-                                rotator,
-                                "angle"
-                            )
-                    });
-                }
+            movements
+        });
+    }
 
 
-                situations.get(event.sequence).push({
+    return result;
+}
 
-                    characterID:
-                        characterID,
+
+/*
+============================================================
+CAMERAS / TRACK
+
+Equivalent of create_cameras():
+
+Track membership:
+
+Track fromConstraints
+Track toConstraints
++
+Camera snapPath == Track uniqueID
+
+TIME ORDER:
+first TRUE ObjectEvent
+
+NOT spatial order.
+============================================================
+*/
+
+
+function buildCameraData(data) {
+
+    const cameras =
+        data.cameras;
+
+
+    const byId =
+        new Map();
+
+
+    for (
+        const camera
+        of cameras
+    ) {
+
+        byId.set(
+            T(
+                camera,
+                "uniqueID"
+            ),
+            camera
+        );
+    }
+
+
+    const trackMemberIDs =
+        new Set();
+
+
+    const movingCameras = [];
+
+
+    let trackIndex = 0;
+
+
+    for (
+        const track
+        of data.tracks
+    ) {
+
+        trackIndex++;
+
+
+        const trackID =
+            T(
+                track,
+                "uniqueID"
+            );
+
+
+        const ids = [
+
+            T(
+                track,
+                "fromConstraints"
+            ),
+
+            T(
+                track,
+                "toConstraints"
+            )
+        ];
+
+
+        /*
+        Camera states snapped to this Track.
+        */
+
+
+        for (
+            const camera
+            of cameras
+        ) {
+
+            if (
+                T(
+                    camera,
+                    "snapPath"
+                ) === trackID
+            ) {
+
+                ids.push(
+                    T(
+                        camera,
+                        "uniqueID"
+                    )
+                );
+            }
+        }
+
+
+        /*
+        Remove duplicate IDs while preserving order.
+        */
+
+
+        const uniqueIDs = [];
+
+        const seen =
+            new Set();
+
+
+        for (
+            const id
+            of ids
+        ) {
+
+            if (
+                id &&
+                !seen.has(id)
+            ) {
+
+                seen.add(id);
+
+                uniqueIDs.push(id);
+            }
+        }
+
+
+        const members = [];
+
+
+        for (
+            const uid
+            of uniqueIDs
+        ) {
+
+            const camera =
+                byId.get(uid);
+
+
+            if (camera) {
+
+                members.push(
+                    camera
+                );
+
+                trackMemberIDs.add(
+                    uid
+                );
+            }
+        }
+
+
+        if (
+            members.length === 0
+        ) {
+            continue;
+        }
+
+
+        /*
+        TIME order from ObjectEvents.
+        */
+
+
+        members.sort(
+            (a, b) =>
+                firstTrueSeq(a, 999)
+                -
+                firstTrueSeq(b, 999)
+        );
+
+
+        /*
+        Physical Track geometry.
+        */
+
+
+        const trackPoints = [];
+
+
+        const pointsNode =
+            directChild(
+                track,
+                "Points"
+            );
+
+
+        if (pointsNode) {
+
+            const stored =
+                directChildren(
+                    pointsNode,
+                    "Point"
+                );
+
+
+            for (
+                const point
+                of stored
+            ) {
+
+                trackPoints.push({
 
                     x:
-                        characterX,
+                        F(
+                            point,
+                            "x"
+                        ),
 
                     y:
-                        characterY,
-
-                    colorName:
-                        colorName,
-
-                    disabledRotators:
-                        event.disabledRotators,
-
-                    activeRotators:
-                        activeRotators
+                        F(
+                            point,
+                            "y"
+                        )
                 });
             }
         }
 
 
-        const sortedSequences =
-            Array.from(situations.keys())
-                .sort((a, b) => a - b);
+        /*
+        Same fallback as Python:
+        if Track has fewer than 2 stored Points,
+        use its from/to camera states.
+        */
 
 
-        for (const sequence of sortedSequences) {
+        if (
+            trackPoints.length < 2
+        ) {
 
-            situationData +=
-                "<br><br><strong>SITUÁCIA " +
-                sequence +
-                "</strong><br>";
-
-
-            const states =
-                situations.get(sequence);
-
-
-            for (const state of states) {
-
-                situationData +=
-
-                    "<br>" +
-
-                    "Character: " +
-                    state.characterID +
-                    "<br>" +
-
-                    "X: " +
-                    state.x +
-                    "<br>" +
-
-                    "Y: " +
-                    state.y +
-                    "<br>" +
-
-                    "ColorName: " +
-                    state.colorName +
-                    "<br>" +
-
-                    "DisabledRotators: " +
-                    state.disabledRotators +
-                    "<br>";
+            const a =
+                byId.get(
+                    T(
+                        track,
+                        "fromConstraints"
+                    )
+                );
 
 
-                if (
-                    state.activeRotators.length === 0
-                ) {
+            const b =
+                byId.get(
+                    T(
+                        track,
+                        "toConstraints"
+                    )
+                );
 
-                    situationData +=
-                        "Aktívny RotatorCharacter: NONE<br>";
 
-                } else {
+            if (
+                a &&
+                b
+            ) {
 
-                    for (
-                        let r = 0;
-                        r < state.activeRotators.length;
-                        r++
-                    ) {
+                trackPoints.length = 0;
 
-                        situationData +=
 
-                            "Aktívny RotatorCharacter " +
-                            (r + 1) +
-                            ": " +
-                            state.activeRotators[r].id +
-                            "<br>" +
+                trackPoints.push({
 
-                            "Angle: " +
-                            state.activeRotators[r].angle +
-                            "<br>";
-                    }
-                }
+                    x:
+                        F(a, "x"),
+
+                    y:
+                        F(a, "y")
+                });
+
+
+                trackPoints.push({
+
+                    x:
+                        F(b, "x"),
+
+                    y:
+                        F(b, "y")
+                });
             }
         }
 
 
-        /*
-        ========================================
-        OUTPUT
-        ========================================
-        */
+        movingCameras.push({
 
+            name:
+                "DOLLY_" +
+                String(
+                    trackIndex
+                ).padStart(
+                    2,
+                    "0"
+                ),
 
-        status.innerHTML =
+            trackID,
 
-            "HCW súbor bol úspešne prečítaný: " +
-            file.name +
+            trackPoints,
 
-            "<br><br>" +
+            states:
+                members.map(
+                    camera => ({
 
-            "<strong>HCW ŠTRUKTÚRA:</strong><br>" +
+                        id:
+                            T(
+                                camera,
+                                "uniqueID"
+                            ),
 
-            "Character: " +
-            characters.length +
-            "<br>" +
+                        sequence:
+                            firstTrueSeq(
+                                camera,
+                                0
+                            ),
 
-            "Camera: " +
-            cameras.length +
-            "<br>" +
+                        x:
+                            F(
+                                camera,
+                                "x"
+                            ),
 
-            "WalkArrow: " +
-            walkArrows.length +
-            "<br>" +
+                        y:
+                            F(
+                                camera,
+                                "y"
+                            ),
 
-            "Track: " +
-            tracks.length +
-            "<br>" +
+                        angle:
+                            angleOf(
+                                camera,
+                                "RotatorCamera"
+                            ),
 
-            "TimeNumber: " +
-            timeNumbers.length +
-            "<br>" +
+                        stopMarks:
+                            T(
+                                camera,
+                                "stopMarks"
+                            ),
 
-            "OnOffEvent: " +
-            allOnOffEvents.length +
+                        snapPath:
+                            T(
+                                camera,
+                                "snapPath"
+                            ),
 
-            "<br><br>" +
-
-            "<strong>CHARACTER DATA:</strong>" +
-
-            characterData +
-
-            situationData;
-
-
-    } catch (error) {
-
-        status.textContent =
-            "CHYBA: HCW súbor sa nepodarilo prečítať.";
-
-        console.error(error);
+                        snapPercent:
+                            F(
+                                camera,
+                                "snapPercent"
+                            )
+                    })
+                )
+        });
     }
 
-});
+
+    /*
+    ---------------------------
+    STATIC CAMERAS
+    ---------------------------
+    */
+
+
+    const staticCameras = [];
+
+
+    let cameraIndex = 0;
+
+
+    for (
+        const camera
+        of cameras
+    ) {
+
+        cameraIndex++;
+
+
+        const id =
+            T(
+                camera,
+                "uniqueID"
+            );
+
+
+        if (
+            trackMemberIDs.has(id)
+        ) {
+            continue;
+        }
+
+
+        staticCameras.push({
+
+            name:
+                "CAMERA_STATIC_" +
+                String(
+                    cameraIndex
+                ).padStart(
+                    2,
+                    "0"
+                ),
+
+            id,
+
+            sequence:
+                firstTrueSeq(
+                    camera,
+                    0
+                ),
+
+            x:
+                F(
+                    camera,
+                    "x"
+                ),
+
+            y:
+                F(
+                    camera,
+                    "y"
+                ),
+
+            angle:
+                angleOf(
+                    camera,
+                    "RotatorCamera"
+                )
+        });
+    }
+
+
+    return {
+
+        movingCameras,
+        staticCameras
+    };
+}
+
+
+/*
+============================================================
+REPORT
+============================================================
+*/
+
+
+function makeReport(
+    fileName,
+    data,
+    actors,
+    actorTimeline,
+    cameraData
+) {
+
+    const lines = [];
+
+
+    lines.push(
+        "HCW súbor: " +
+        fileName
+    );
+
+
+    lines.push("");
+
+
+    lines.push(
+        "=== HCW PARSER ==="
+    );
+
+
+    lines.push(
+        "Sequences: " +
+        data.sequences.length
+    );
+
+
+    lines.push(
+        "Character scene states: " +
+        data.sceneStates.length
+    );
+
+
+    lines.push(
+        "Character templates: " +
+        data.templates.length
+    );
+
+
+    lines.push(
+        "Logical actors: " +
+        actors.length
+    );
+
+
+    lines.push(
+        "WalkArrow: " +
+        data.walks.length
+    );
+
+
+    lines.push(
+        "Camera states: " +
+        data.cameras.length
+    );
+
+
+    lines.push(
+        "Track: " +
+        data.tracks.length
+    );
+
+
+    lines.push(
+        "GenericProp: " +
+        data.props.length
+    );
+
+
+    lines.push(
+        "GenericLight: " +
+        data.lights.length
+    );
+
+
+    lines.push(
+        "Caption: " +
+        data.captions.length
+    );
+
+
+    lines.push("");
+
+
+    lines.push(
+        "SEQUENCE IDs:"
+    );
+
+
+    lines.push(
+        data.sequences.join(", ")
+    );
+
+
+    /*
+    ========================================================
+    ACTORS
+    ========================================================
+    */
+
+
+    lines.push("");
+    lines.push(
+        "========================================"
+    );
+
+    lines.push(
+        "ACTORS"
+    );
+
+    lines.push(
+        "========================================"
+    );
+
+
+    for (
+        const actor
+        of actorTimeline
+    ) {
+
+        lines.push("");
+
+        lines.push(
+            "ACTOR: " +
+            actor.name
+        );
+
+
+        lines.push(
+            "Initial state: " +
+            actor.initial.stateID
+        );
+
+
+        lines.push(
+            "Initial sequence: " +
+            actor.initial.sequence
+        );
+
+
+        lines.push(
+            "Initial XY: " +
+            actor.initial.x +
+            ", " +
+            actor.initial.y
+        );
+
+
+        lines.push(
+            "Initial angle: " +
+            actor.initial.angle
+        );
+
+
+        lines.push(
+            "Walks: " +
+            actor.movements.length
+        );
+
+
+        for (
+            let i = 0;
+            i < actor.movements.length;
+            i++
+        ) {
+
+            const movement =
+                actor.movements[i];
+
+
+            lines.push("");
+
+            lines.push(
+                "  WALK " +
+                (i + 1)
+            );
+
+
+            lines.push(
+                "  FROM: " +
+                movement.fromID
+            );
+
+
+            lines.push(
+                "  TO: " +
+                movement.toID
+            );
+
+
+            lines.push(
+                "  SEQUENCE: " +
+                movement.startSequence +
+                " -> " +
+                movement.endSequence
+            );
+
+
+            lines.push(
+                "  END ANGLE: " +
+                movement.endAngle
+            );
+
+
+            lines.push(
+                "  POINTS:"
+            );
+
+
+            for (
+                const point
+                of movement.points
+            ) {
+
+                lines.push(
+                    "    " +
+                    point.x +
+                    ", " +
+                    point.y
+                );
+            }
+        }
+    }
+
+
+    /*
+    ========================================================
+    CAMERAS
+    ========================================================
+    */
+
+
+    lines.push("");
+    lines.push(
+        "========================================"
+    );
+
+    lines.push(
+        "CAMERAS"
+    );
+
+    lines.push(
+        "========================================"
+    );
+
+
+    for (
+        const dolly
+        of cameraData.movingCameras
+    ) {
+
+        lines.push("");
+
+        lines.push(
+            dolly.name
+        );
+
+
+        lines.push(
+            "Track ID: " +
+            dolly.trackID
+        );
+
+
+        lines.push(
+            "Camera states: " +
+            dolly.states.length
+        );
+
+
+        for (
+            const state
+            of dolly.states
+        ) {
+
+            lines.push(
+                "  seq=" +
+                state.sequence +
+                "  XY=" +
+                state.x +
+                "," +
+                state.y +
+                "  angle=" +
+                state.angle +
+                "  stopMarks=" +
+                state.stopMarks +
+                "  snapPercent=" +
+                state.snapPercent
+            );
+        }
+
+
+        lines.push(
+            "Track Points:"
+        );
+
+
+        for (
+            const point
+            of dolly.trackPoints
+        ) {
+
+            lines.push(
+                "  " +
+                point.x +
+                ", " +
+                point.y
+            );
+        }
+    }
+
+
+    for (
+        const camera
+        of cameraData.staticCameras
+    ) {
+
+        lines.push("");
+
+        lines.push(
+            camera.name
+        );
+
+
+        lines.push(
+            "ID: " +
+            camera.id
+        );
+
+
+        lines.push(
+            "Sequence: " +
+            camera.sequence
+        );
+
+
+        lines.push(
+            "XY: " +
+            camera.x +
+            ", " +
+            camera.y
+        );
+
+
+        lines.push(
+            "Angle: " +
+            camera.angle
+        );
+    }
+
+
+    return lines.join("\n");
+}
+
+
+/*
+============================================================
+MAIN
+============================================================
+*/
+
+
+const fileInput =
+    document.getElementById(
+        "hcwFile"
+    );
+
+
+const openButton =
+    document.getElementById(
+        "openButton"
+    );
+
+
+const status =
+    document.getElementById(
+        "status"
+    );
+
+
+const output =
+    document.getElementById(
+        "output"
+    );
+
+
+openButton.addEventListener(
+    "click",
+    async () => {
+
+        const file =
+            fileInput.files[0];
+
+
+        if (!file) {
+
+            status.className =
+                "error";
+
+            status.textContent =
+                "Najprv vyber HCW súbor.";
+
+            return;
+        }
+
+
+        try {
+
+            status.className = "";
+
+            status.textContent =
+                "Čítam HCW...";
+
+
+            output.textContent = "";
+
+
+            const text =
+                await file.text();
+
+
+            const parser =
+                new DOMParser();
+
+
+            const xml =
+                parser.parseFromString(
+                    text,
+                    "application/xml"
+                );
+
+
+            const parserError =
+                xml.getElementsByTagName(
+                    "parsererror"
+                );
+
+
+            if (
+                parserError.length > 0
+            ) {
+
+                throw new Error(
+                    "HCW XML sa nepodarilo načítať."
+                );
+            }
+
+
+            /*
+            ================================================
+            EXISTING PROVEN PIPELINE
+            ================================================
+            */
+
+
+            const data =
+                parseHCW(xml);
+
+
+            const actors =
+                buildActorComponents(
+                    data
+                );
+
+
+            const actorTimeline =
+                buildActorTimeline(
+                    data,
+                    actors
+                );
+
+
+            const cameraData =
+                buildCameraData(
+                    data
+                );
+
+
+            /*
+            ================================================
+            REPORT
+            ================================================
+            */
+
+
+            output.textContent =
+                makeReport(
+                    file.name,
+                    data,
+                    actors,
+                    actorTimeline,
+                    cameraData
+                );
+
+
+            status.className =
+                "ok";
+
+
+            status.textContent =
+                "HCW úspešne načítané — parser dokončený.";
+
+        }
+
+        catch (error) {
+
+            console.error(error);
+
+
+            status.className =
+                "error";
+
+
+            status.textContent =
+                "CHYBA: " +
+                error.message;
+        }
+    }
+);
 
 </script>
 
