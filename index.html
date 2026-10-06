@@ -114,7 +114,7 @@
         <button id="playButton" disabled>PLAY</button>
         <button id="stopButton" disabled>STOP</button>
         <button id="exportButton" disabled>EXPORT MP4</button>
-        <strong>LOCK: POHYB 1,5 s → HOLD 1,0 s</strong>
+        <strong>LOCK: POHYB 1,5 s → HOLD 1,0 s</strong><strong> | STRICT HCW: BEZ ODHADU</strong>
     </div>
     <canvas id="sceneCanvas" width="1280" height="720"></canvas>
     <div id="playerInfo">Najprv otvor HCW súbor.</div>
@@ -2392,7 +2392,104 @@ function backgroundCorners(bg) {
     }));
 }
 
+
+function strictHCWAudit(data, actors) {
+    const problems = [];
+
+    // The current renderer has no proven HCW visual transcription for these object classes.
+    // STRICT rule: stop instead of inventing a symbol/shape.
+    if (data.props.length > 0) {
+        problems.push(`GenericProp=${data.props.length}: vizuálny tvar GenericProp nie je v tejto verzii 100 % overene prenesený.`);
+    }
+    if (data.lights.length > 0) {
+        problems.push(`GenericLight=${data.lights.length}: vizuálny tvar GenericLight nie je v tejto verzii 100 % overene prenesený.`);
+    }
+
+    const stateById = new Map(data.sceneStates.map(s => [T(s,"uniqueID"), s]));
+
+    // Every spatial actor-state change must have its exact HCW WalkArrow.
+    for (const actor of actors) {
+        const states = actor.states.slice().sort((a,b) => firstTrueSeq(a,999999)-firstTrueSeq(b,999999));
+        for (let i=0; i<states.length-1; i++) {
+            const a=states[i], b=states[i+1];
+            const ax=F(a,"x"), ay=F(a,"y"), bx=F(b,"x"), by=F(b,"y");
+            if (ax===bx && ay===by) continue; // exact turn-in-place is allowed
+            const found = actor.walks.some(w =>
+                T(w,"fromConstraints")===T(a,"uniqueID") &&
+                T(w,"toConstraints")===T(b,"uniqueID")
+            );
+            if (!found) {
+                problems.push(`Actor ${actor.name}: ${T(a,"uniqueID")} → ${T(b,"uniqueID")} mení XY, ale HCW nemá jednoznačný WalkArrow.`);
+            }
+        }
+    }
+
+    // Track membership must be explicit from from/to or snapPath.
+    const trackIDs = new Set(data.tracks.map(t=>T(t,"uniqueID")));
+    for (const c of data.cameras) {
+        const sp=T(c,"snapPath","");
+        if (sp && !trackIDs.has(sp)) {
+            problems.push(`Camera ${T(c,"uniqueID")}: snapPath=${sp}, ale taký Track v HCW neexistuje.`);
+        }
+    }
+
+    // Embedded background, if referenced, must exist in Pictures.
+    if (data.background) {
+        const pid=T(data.background,"pictureUniqueID","");
+        if (pid && !data.pictures.has(pid)) {
+            problems.push(`Background odkazuje na Picture ${pid}, ale Picture/base64Data v HCW chýba.`);
+        }
+    }
+
+    if (problems.length) {
+        throw new Error(
+            "STRICT HCW STOP — nič sa nebude domýšľať:\n" +
+            problems.map((p,i)=>`${i+1}. ${p}`).join("\n")
+        );
+    }
+}
+
+function exactTrackPoints(track, members) {
+    const P=directChild(track,"Points");
+    let pts=P ? directChildren(P,"Point").map(p=>({x:F(p,"x"),y:F(p,"y")})) : [];
+    if (pts.length >= 2) return pts;
+
+    // This fallback is not an estimate: Track explicitly identifies its endpoints.
+    const a=members.find(c=>T(c,"uniqueID")===T(track,"fromConstraints"));
+    const b=members.find(c=>T(c,"uniqueID")===T(track,"toConstraints"));
+    if (a && b) return [{x:F(a,"x"),y:F(a,"y")},{x:F(b,"x"),y:F(b,"y")}];
+
+    throw new Error(`STRICT HCW STOP — Track ${T(track,"uniqueID")} nemá jednoznačnú geometriu.`);
+}
+
+function cameraTrackPercent(camera, track) {
+    const id=T(camera,"uniqueID");
+    if (id===T(track,"fromConstraints")) return 0;
+    if (id===T(track,"toConstraints")) return 1;
+
+    const rawAbs=T(camera,"snapAbsolutePercent","");
+    if (rawAbs!=="") {
+        const v=Number(rawAbs);
+        if (Number.isFinite(v)) return v;
+    }
+    const raw=T(camera,"snapPercent","");
+    if (raw!=="") {
+        const v=Number(raw);
+        if (Number.isFinite(v)) return v;
+    }
+    throw new Error(`STRICT HCW STOP — Camera ${id} je na Tracku, ale HCW neurčuje snapPercent/snapAbsolutePercent.`);
+}
+
+function pointOnExactTrack(trackPoints, percent) {
+    return pointOnPolyline(trackPoints, percent, 0, 0);
+}
+
+function cleanCaptionForCanvas(caption) {
+    return cleanText(T(caption,"userText",""));
+}
+
 async function makePlayerModel(data, actors, cameraData) {
+    strictHCWAudit(data, actors);
     const sequences = [...data.sequences].sort((a,b)=>a-b);
     const hcwBackground = await loadHCWBackground(data);
     if (sequences.length === 0) throw new Error("HCW neobsahuje žiadne situácie/sequence.");
@@ -2421,14 +2518,20 @@ async function makePlayerModel(data, actors, cameraData) {
             T(c,"uniqueID") === T(track,"toConstraints") ||
             T(c,"snapPath") === tid
         );
+        const trackPoints = exactTrackPoints(track, members);
         return {
-            name: `DOLLY_${index+1}`,
+            // No invented scene name is used for rendering.
             track,
             members,
+            trackPoints,
             situations: sequences.map(seq => {
                 const active = members.map(c=>cameraSituationState(c,seq)).filter(Boolean);
-                if (active.length > 1) throw new Error(`Dolly ${index+1}: v situácii ${seq} je aktívnych viac kamerových stavov.`);
-                return active[0] || null;
+                if (active.length > 1) throw new Error(`Track ${tid}: v situácii ${seq} je aktívnych viac kamerových stavov.`);
+                if (!active[0]) return null;
+                return {
+                    ...active[0],
+                    trackPercent: cameraTrackPercent(active[0].camera, track)
+                };
             })
         };
     });
@@ -2436,7 +2539,6 @@ async function makePlayerModel(data, actors, cameraData) {
     const staticTracks = data.cameras
         .filter(c => !dollyCameraIDs.has(T(c,"uniqueID")))
         .map((camera,index) => ({
-            name:`STATIC_${index+1}`,
             camera,
             situations: sequences.map(seq => cameraSituationState(camera,seq))
         }));
@@ -2495,13 +2597,30 @@ function cameraPoseAt(track, phase) {
     const a=track.situations[phase.index], b=track.situations[phase.nextIndex];
     if(!a && !b) return null;
     if(!phase.moving) return b || a;
-    if(!a) return b; if(!b) return a;
-    return {
-        ...b,
-        x:a.x+(b.x-a.x)*phase.p,
-        y:a.y+(b.y-a.y)*phase.p,
-        angle:lerpAngle(a.angle,b.angle,phase.p)
-    };
+    if(!a) return b;
+    if(!b) return a;
+
+    // Dolly: move only on the exact HCW Track geometry.
+    if (track.track && track.trackPoints) {
+        const p=a.trackPercent+(b.trackPercent-a.trackPercent)*phase.p;
+        const q=pointOnExactTrack(track.trackPoints,p);
+        return {
+            ...b,
+            x:q.x,
+            y:q.y,
+            angle:lerpAngle(a.angle,b.angle,phase.p)
+        };
+    }
+
+    // Standalone camera: HCW does not give it a movement path.
+    // Same XY may rotate in place. Different XY is not invented.
+    if (a.x===b.x && a.y===b.y) {
+        return {...b,x:a.x,y:a.y,angle:lerpAngle(a.angle,b.angle,phase.p)};
+    }
+
+    throw new Error(
+        `STRICT HCW STOP — samostatná Camera ${a.id} mení XY bez Tracku. Pohybovú trasu HCW jednoznačne neurčuje.`
+    );
 }
 
 function worldToCanvas(model,canvas,x,y) {
@@ -2549,16 +2668,30 @@ function drawSceneAt(seconds) {
         ctx.restore();
     }
 
-    // Dolly track lines from exact HCW Track Points; if Track has no stored polyline, use from/to camera positions.
+    // Dolly Track: exact HCW geometry only.
     for(const d of playerModel.dollyTracks){
-        let pts=[]; const P=directChild(d.track,"Points");
-        if(P) pts=directChildren(P,"Point").map(p=>({x:F(p,"x"),y:F(p,"y")}));
-        if(pts.length<2){
-            const a=d.members.find(c=>T(c,"uniqueID")===T(d.track,"fromConstraints"));
-            const b=d.members.find(c=>T(c,"uniqueID")===T(d.track,"toConstraints"));
-            if(a&&b) pts=[{x:F(a,"x"),y:F(a,"y")},{x:F(b,"x"),y:F(b,"y")}];
+        const pts=d.trackPoints;
+        ctx.strokeStyle="#8a5aa5";ctx.lineWidth=2;ctx.beginPath();
+        pts.forEach((p,i)=>{const q=worldToCanvas(playerModel,canvas,p.x,p.y);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});
+        ctx.stroke();
+    }
+
+    // HCW captions: exact stored XY and text. No relocation.
+    for (const cap of playerModel.data.captions) {
+        const label=cleanCaptionForCanvas(cap);
+        if(!label) continue;
+        const q=worldToCanvas(playerModel,canvas,F(cap,"x"),F(cap,"y"));
+        const fontSize=T(cap,"fontSize","0")==="1" ? 15 : 12;
+        const bold=T(cap,"fontBold","false").toLowerCase()==="true";
+        ctx.font=`${bold?"bold ":""}${fontSize}px Arial`;
+        const w=ctx.measureText(label).width;
+        // HCW backgroundColor index is retained in data; exact palette is not inferred here.
+        if(T(cap,"backgroundColor","0")!=="0"){
+            ctx.fillStyle="rgba(255,255,255,.85)";
+            ctx.fillRect(q.x-3,q.y-fontSize,w+6,fontSize+5);
         }
-        if(pts.length>=2){ctx.strokeStyle="#8a5aa5";ctx.lineWidth=2;ctx.beginPath();pts.forEach((p,i)=>{const q=worldToCanvas(playerModel,canvas,p.x,p.y);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});ctx.stroke();}
+        ctx.fillStyle="#111";
+        ctx.fillText(label,q.x,q.y);
     }
 
     for(const tr of playerModel.actorTracks){
@@ -2572,11 +2705,11 @@ function drawSceneAt(seconds) {
 
     for(const d of playerModel.dollyTracks){
         const pose=cameraPoseAt(d,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
-        drawCameraSymbol(ctx,q.x,q.y,pose.angle,pose.stopMarks?`${d.name} ${pose.stopMarks}`:d.name,true);
+        drawCameraSymbol(ctx,q.x,q.y,pose.angle,pose.stopMarks?String(pose.stopMarks):"",true);
     }
     for(const c of playerModel.staticTracks){
         const pose=cameraPoseAt(c,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
-        drawCameraSymbol(ctx,q.x,q.y,pose.angle,c.name,false);
+        drawCameraSymbol(ctx,q.x,q.y,pose.angle,"",false);
     }
 
     ctx.fillStyle="#111";ctx.font="16px Arial";
@@ -2820,8 +2953,8 @@ openButton.addEventListener(
 
             status.textContent =
                 playerModel && playerModel.hcwBackground
-                    ? "HCW úspešne načítané — parser + dekorácia + animácia pripravené."
-                    : "HCW úspešne načítané — parser + animácia pripravené; HCW neobsahuje vložený Background Picture.";
+                    ? "HCW úspešne načítané — STRICT technický prepis + dekorácia + animácia pripravené."
+                    : "HCW úspešne načítané — STRICT technický prepis + animácia pripravené; HCW neobsahuje vložený Background Picture.";
 
         }
 
