@@ -2195,6 +2195,9 @@ LOCK:
 ============================================================
 */
 
+// HCW_CANVAS_AXIS_LOCK:
+ // Shot Designer HCW coordinates are rendered without axis reinterpretation.
+ // +X right, +Y down. Do not invert Y.
 const MOVE_SECONDS = 1.5;
 const HOLD_SECONDS = 1.0;
 const EXPORT_FPS = 24;
@@ -2628,11 +2631,18 @@ function worldToCanvas(model,canvas,x,y) {
     const scale=Math.min((canvas.width-2*pad)/bw,(canvas.height-2*pad)/bh);
     const usedW=bw*scale, usedH=bh*scale;
     const ox=(canvas.width-usedW)/2, oy=(canvas.height-usedH)/2;
-    return {x:ox+(x-model.bounds.minX)*scale, y:canvas.height-(oy+(y-model.bounds.minY)*scale), scale};
+
+    // HCW / Shot Designer canvas convention is preserved 1:1:
+    // +X = right, +Y = down. NO Y inversion.
+    return {
+        x:ox+(x-model.bounds.minX)*scale,
+        y:oy+(y-model.bounds.minY)*scale,
+        scale
+    };
 }
 
 function drawArrow(ctx,x,y,angle,length) {
-    const dx=Math.cos(angle)*length, dy=-Math.sin(angle)*length;
+    const dx=Math.cos(angle)*length, dy=Math.sin(angle)*length;
     ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y+dy);ctx.stroke();
     const aa=Math.atan2(dy,dx);
     ctx.beginPath();ctx.moveTo(x+dx,y+dy);ctx.lineTo(x+dx-8*Math.cos(aa-.5),y+dy-8*Math.sin(aa-.5));
@@ -2640,7 +2650,7 @@ function drawArrow(ctx,x,y,angle,length) {
 }
 
 function drawCameraSymbol(ctx,x,y,angle,label,isDolly) {
-    ctx.save(); ctx.translate(x,y); ctx.rotate(-angle);
+    ctx.save(); ctx.translate(x,y); ctx.rotate(angle);
     ctx.lineWidth=2; ctx.strokeStyle=isDolly?"#7a2ca8":"#222"; ctx.fillStyle="#fff";
     ctx.strokeRect(-13,-9,22,18);
     ctx.beginPath();ctx.moveTo(9,-6);ctx.lineTo(19,-11);ctx.lineTo(19,11);ctx.lineTo(9,6);ctx.closePath();ctx.stroke();
@@ -2662,7 +2672,7 @@ function drawSceneAt(seconds) {
         const sy = q.scale * bg.scaleY;
         ctx.save();
         ctx.translate(q.x, q.y);
-        ctx.rotate(-bg.angle);
+        ctx.rotate(bg.angle);
         ctx.scale(sx, sy);
         ctx.drawImage(bg.image, -bg.width/2, -bg.height/2, bg.width, bg.height);
         ctx.restore();
