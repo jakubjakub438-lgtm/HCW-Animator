@@ -2670,10 +2670,12 @@ function worldToCanvas(model, canvas, x, y) {
 }
 
 function drawActorArrow(ctx,x,y,angle,length) {
-    // HCW RotatorCharacter is the source. Proven HCW world direction:
-    // (-cos(angle), +sin(angle)).
-    // Canvas/embedded Shot Designer image has Y downward, so display Y is negated.
-    const dx=-Math.cos(angle)*length, dy=-Math.sin(angle)*length;
+    // LOCKED / PROVEN existing HCW actor-facing convention from FIX110R2 / SD212:
+    // ACTOR_DIRECTION_SOURCE = HCW_RotatorCharacter
+    // ACTOR_DIRECTION_CONVENTION_WORLD_XY = (-cos(angle), +sin(angle))
+    // HCW->Background mapping already maps HCW +Y to image +Y (down),
+    // therefore NO additional sign conversion is allowed here.
+    const dx=-Math.cos(angle)*length, dy=Math.sin(angle)*length;
     ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y+dy);ctx.stroke();
     const aa=Math.atan2(dy,dx);
     ctx.beginPath();
