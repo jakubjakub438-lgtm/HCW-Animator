@@ -2339,8 +2339,62 @@ function findActorWalk(actor, fromID, toID, stateById) {
     return null;
 }
 
-function makePlayerModel(data, actors, cameraData) {
+
+function imageMimeFromBase64(base64) {
+    if (base64.startsWith("iVBOR")) return "image/png";
+    if (base64.startsWith("/9j/")) return "image/jpeg";
+    if (base64.startsWith("R0lGOD")) return "image/gif";
+    if (base64.startsWith("UklGR")) return "image/webp";
+    return "application/octet-stream";
+}
+
+function loadHCWBackground(data) {
+    return new Promise((resolve, reject) => {
+        const bg = data.background;
+        if (!bg) { resolve(null); return; }
+        const pictureID = T(bg, "pictureUniqueID", "");
+        if (!pictureID) { resolve(null); return; }
+        const base64 = data.pictures.get(pictureID);
+        if (!base64) {
+            reject(new Error(`HCW Background odkazuje na Picture ${pictureID}, ale jeho base64Data v HCW chýba.`));
+            return;
+        }
+        const img = new Image();
+        img.onload = () => {
+            const subObjects = directChild(bg, "SubObjects");
+            const rotator = subObjects ? directChild(subObjects, "RotatorObject") : null;
+            resolve({
+                element: bg,
+                image: img,
+                x: F(bg, "x", 0),
+                y: F(bg, "y", 0),
+                scaleX: F(bg, "objectScaleX", 1),
+                scaleY: F(bg, "objectScaleY", 1),
+                angle: rotator ? F(rotator, "angle", 0) : 0,
+                width: img.naturalWidth,
+                height: img.naturalHeight,
+                pictureID
+            });
+        };
+        img.onerror = () => reject(new Error(`HCW Background Picture ${pictureID} sa nepodarilo dekódovať.`));
+        img.src = `data:${imageMimeFromBase64(base64)};base64,${base64}`;
+    });
+}
+
+function backgroundCorners(bg) {
+    if (!bg) return [];
+    const hw = bg.width * bg.scaleX / 2;
+    const hh = bg.height * bg.scaleY / 2;
+    const c = Math.cos(bg.angle), s = Math.sin(bg.angle);
+    return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([dx,dy]) => ({
+        x: bg.x + dx*c - dy*s,
+        y: bg.y + dx*s + dy*c
+    }));
+}
+
+async function makePlayerModel(data, actors, cameraData) {
     const sequences = [...data.sequences].sort((a,b)=>a-b);
+    const hcwBackground = await loadHCWBackground(data);
     if (sequences.length === 0) throw new Error("HCW neobsahuje žiadne situácie/sequence.");
 
     const stateById = new Map(data.sceneStates.map(s => [T(s,"uniqueID"), s]));
@@ -2388,6 +2442,7 @@ function makePlayerModel(data, actors, cameraData) {
         }));
 
     const worldPoints = [];
+    worldPoints.push(...backgroundCorners(hcwBackground));
     for (const a of actorTracks) for (const s of a.situations) if (s) worldPoints.push({x:s.x,y:s.y});
     for (const a of actors) for (const w of a.walks) worldPoints.push(...walkPoints(w,stateById));
     for (const c of data.cameras) worldPoints.push({x:F(c,"x"),y:F(c,"y")});
@@ -2402,7 +2457,7 @@ function makePlayerModel(data, actors, cameraData) {
 
     const transitions = Math.max(0,sequences.length-1);
     const totalSeconds = HOLD_SECONDS + transitions*(MOVE_SECONDS+HOLD_SECONDS);
-    return {data,actors,cameraData,sequences,stateById,actorTracks,dollyTracks,staticTracks,bounds:{minX,maxX,minY,maxY},totalSeconds};
+    return {data,actors,cameraData,sequences,stateById,actorTracks,dollyTracks,staticTracks,hcwBackground,bounds:{minX,maxX,minY,maxY},totalSeconds};
 }
 
 function phaseAtTime(model, seconds) {
@@ -2479,6 +2534,20 @@ function drawSceneAt(seconds) {
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
     if(!playerModel) return;
     const phase=phaseAtTime(playerModel,Math.max(0,Math.min(seconds,playerModel.totalSeconds)));
+
+    // Exact HCW embedded Background image (decoration/floor plan), read from Pictures/base64Data.
+    if (playerModel.hcwBackground) {
+        const bg = playerModel.hcwBackground;
+        const q = worldToCanvas(playerModel, canvas, bg.x, bg.y);
+        const sx = q.scale * bg.scaleX;
+        const sy = q.scale * bg.scaleY;
+        ctx.save();
+        ctx.translate(q.x, q.y);
+        ctx.rotate(-bg.angle);
+        ctx.scale(sx, sy);
+        ctx.drawImage(bg.image, -bg.width/2, -bg.height/2, bg.width, bg.height);
+        ctx.restore();
+    }
 
     // Dolly track lines from exact HCW Track Points; if Track has no stored polyline, use from/to camera positions.
     for(const d of playerModel.dollyTracks){
@@ -2569,8 +2638,8 @@ async function exportMP4() {
     animationRAF=requestAnimationFrame(tick);
 }
 
-function installPlayerModel(data,actors,cameraData) {
-    playerModel=makePlayerModel(data,actors,cameraData); currentAnimationSeconds=0;
+async function installPlayerModel(data,actors,cameraData) {
+    playerModel=await makePlayerModel(data,actors,cameraData); currentAnimationSeconds=0;
     document.getElementById("playButton").disabled=false;
     document.getElementById("stopButton").disabled=false;
     document.getElementById("exportButton").disabled=false;
@@ -2721,7 +2790,7 @@ openButton.addEventListener(
 
 
             /* Existing parser data -> universal 2D animation model. */
-            installPlayerModel(
+            await installPlayerModel(
                 data,
                 actors,
                 cameraData
@@ -2750,7 +2819,9 @@ openButton.addEventListener(
 
 
             status.textContent =
-                "HCW úspešne načítané — parser dokončený.";
+                playerModel && playerModel.hcwBackground
+                    ? "HCW úspešne načítané — parser + dekorácia + animácia pripravené."
+                    : "HCW úspešne načítané — parser + animácia pripravené; HCW neobsahuje vložený Background Picture.";
 
         }
 
