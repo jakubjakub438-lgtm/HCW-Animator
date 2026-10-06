@@ -114,7 +114,7 @@
         <button id="playButton" disabled>PLAY</button>
         <button id="stopButton" disabled>STOP</button>
         <button id="exportButton" disabled>EXPORT MP4</button>
-        <strong>LOCK: POHYB 1,5 s → HOLD 1,0 s</strong><strong> | STRICT HCW: BEZ ODHADU</strong>
+        <strong>LOCK: POHYB 1,5 s → HOLD 1,0 s</strong><strong> | STRICT HCW: BEZ ODHADU | SOURCE OR STOP</strong>
     </div>
     <canvas id="sceneCanvas" width="1280" height="720"></canvas>
     <div id="playerInfo">Najprv otvor HCW súbor.</div>
@@ -2285,6 +2285,7 @@ function cameraSituationState(camera, sequence) {
         y: F(camera, "y"),
         angle,
         stopMarks: T(camera, "stopMarks", ""),
+        colorIndex: T(camera, "colorIndex", ""),
         camera
     };
 }
@@ -2519,11 +2520,22 @@ async function makePlayerModel(data, actors, cameraData) {
             T(c,"snapPath") === tid
         );
         const trackPoints = exactTrackPoints(track, members);
+
+        const cameraSetIndices = [...new Set(
+            members.map(c => T(c,"colorIndex","")).filter(v => v !== "")
+        )];
+        if (cameraSetIndices.length !== 1) {
+            throw new Error(
+                `STRICT HCW STOP — Track ${tid}: kamerový set nie je jednoznačný priamo z HCW.`
+            );
+        }
+
         return {
-            // No invented scene name is used for rendering.
+            // Track membership = HCW fromConstraints/toConstraints/snapPath only.
             track,
             members,
             trackPoints,
+            colorIndex: cameraSetIndices[0],
             situations: sequences.map(seq => {
                 const active = members.map(c=>cameraSituationState(c,seq)).filter(Boolean);
                 if (active.length > 1) throw new Error(`Track ${tid}: v situácii ${seq} je aktívnych viac kamerových stavov.`);
@@ -2597,10 +2609,17 @@ function cameraPoseAt(track, phase) {
     const a=track.situations[phase.index], b=track.situations[phase.nextIndex];
     if(!a && !b) return null;
     if(!phase.moving) return b || a;
-    if(!a) return b;
+
+    // Exact same HCW Camera state on both sides of the transition:
+    // position, trackPercent and angle remain exactly unchanged.
+    if(a && b && a.id===b.id) return a;
+
+    // No source state / no target state means HCW gives no camera movement path.
+    // Do not invent one.
+    if(!a) return null;
     if(!b) return a;
 
-    // Dolly: continuous movement for the whole 1.5 s transition.
+    // Dolly: continuous movement only between two distinct HCW Dolly states.
     // Start/end are the exact HCW camera states; the path is the exact HCW Track.
     // No snapping to the target state before phase.p reaches 1.
     if (track.track && track.trackPoints) {
@@ -2680,13 +2699,27 @@ function drawActorArrow(ctx,x,y,angle,length) {
     ctx.stroke();
 }
 
-function drawCameraSymbol(ctx,x,y,angle,label,isDolly) {
+function verifiedCameraSetColor(colorIndex) {
+    /*
+    STRICT PROVENANCE:
+    colorIndex 3 -> TEST04 verified camera set (purple/magenta).
+    colorIndex 2 -> user verified directly in Shot Designer for Pokus 23 as blue.
+    No other mapping is invented. Unknown index = STOP.
+    */
+    if (String(colorIndex) === "3") return "#ff4fc3";
+    if (String(colorIndex) === "2") return "blue";
+    throw new Error(
+        `STRICT HCW STOP — Camera colorIndex=${colorIndex}: farba tohto kamerového setu ešte nie je overená.`
+    );
+}
+
+function drawCameraSymbol(ctx,x,y,angle,label,isDolly,colorIndex) {
     ctx.save();
     ctx.translate(x,y);
     ctx.rotate(angle);
 
     // TEST 04 LOCK: magenta filled film-camera graphic.
-    ctx.fillStyle="#ff4fc3";
+    const cameraColor=verifiedCameraSetColor(colorIndex);\n    ctx.fillStyle=cameraColor;
     ctx.strokeStyle="#111";
     ctx.lineWidth=1.5;
 
@@ -2716,7 +2749,7 @@ function drawCameraSymbol(ctx,x,y,angle,label,isDolly) {
     ctx.restore();
 
     if(label){
-        ctx.fillStyle="#ff4fc3";
+        ctx.fillStyle=cameraColor;
         ctx.font="bold 12px Arial";
         ctx.fillText(label,x+15,y-12);
     }
@@ -2738,7 +2771,7 @@ function drawSceneAt(seconds) {
     // Dolly Track: exact HCW geometry only.
     for(const d of playerModel.dollyTracks){
         const pts=d.trackPoints;
-        ctx.strokeStyle="#8a5aa5";ctx.lineWidth=2;ctx.beginPath();
+        ctx.strokeStyle=verifiedCameraSetColor(d.colorIndex);ctx.lineWidth=2;ctx.beginPath();
         pts.forEach((p,i)=>{const q=worldToCanvas(playerModel,canvas,p.x,p.y);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});
         ctx.stroke();
     }
@@ -2772,11 +2805,11 @@ function drawSceneAt(seconds) {
 
     for(const d of playerModel.dollyTracks){
         const pose=cameraPoseAt(d,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
-        drawCameraSymbol(ctx,q.x,q.y,pose.angle,pose.stopMarks?String(pose.stopMarks):"",true);
+        drawCameraSymbol(ctx,q.x,q.y,pose.angle,pose.stopMarks?String(pose.stopMarks):"",true,pose.colorIndex);
     }
     for(const c of playerModel.staticTracks){
         const pose=cameraPoseAt(c,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
-        drawCameraSymbol(ctx,q.x,q.y,pose.angle,"",false);
+        drawCameraSymbol(ctx,q.x,q.y,pose.angle,"",false,pose.colorIndex);
     }
 
     ctx.fillStyle="#111";ctx.font="16px Arial";
