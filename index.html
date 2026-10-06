@@ -2600,15 +2600,19 @@ function cameraPoseAt(track, phase) {
     if(!a) return b;
     if(!b) return a;
 
-    // Dolly: move only on the exact HCW Track geometry.
+    // Dolly: continuous movement for the whole 1.5 s transition.
+    // Start/end are the exact HCW camera states; the path is the exact HCW Track.
+    // No snapping to the target state before phase.p reaches 1.
     if (track.track && track.trackPoints) {
-        const p=a.trackPercent+(b.trackPercent-a.trackPercent)*phase.p;
+        const u=Math.max(0,Math.min(1,phase.p));
+        const p=a.trackPercent+(b.trackPercent-a.trackPercent)*u;
         const q=pointOnExactTrack(track.trackPoints,p);
         return {
-            ...b,
+            ...a,
             x:q.x,
             y:q.y,
-            angle:lerpAngle(a.angle,b.angle,phase.p)
+            angle:lerpAngle(a.angle,b.angle,u),
+            trackPercent:p
         };
     }
 
@@ -2666,8 +2670,10 @@ function worldToCanvas(model, canvas, x, y) {
 }
 
 function drawActorArrow(ctx,x,y,angle,length) {
-    // PROVEN HCW RotatorCharacter convention: (-cos(angle), +sin(angle))
-    const dx=-Math.cos(angle)*length, dy=Math.sin(angle)*length;
+    // HCW RotatorCharacter is the source. Proven HCW world direction:
+    // (-cos(angle), +sin(angle)).
+    // Canvas/embedded Shot Designer image has Y downward, so display Y is negated.
+    const dx=-Math.cos(angle)*length, dy=-Math.sin(angle)*length;
     ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y+dy);ctx.stroke();
     const aa=Math.atan2(dy,dx);
     ctx.beginPath();
@@ -2680,11 +2686,11 @@ function drawCameraSymbol(ctx,x,y,angle,label,isDolly) {
     ctx.save(); ctx.translate(x,y);
     // PROVEN HCW RotatorCamera convention: (cos(angle), sin(angle))
     ctx.rotate(angle);
-    ctx.lineWidth=2; ctx.strokeStyle=isDolly?"#7a2ca8":"#222"; ctx.fillStyle="#fff";
+    ctx.lineWidth=2; ctx.strokeStyle="#7a2ca8"; ctx.fillStyle="#fff";
     ctx.strokeRect(-13,-9,22,18);
     ctx.beginPath();ctx.moveTo(9,-6);ctx.lineTo(19,-11);ctx.lineTo(19,11);ctx.lineTo(9,6);ctx.closePath();ctx.stroke();
     ctx.restore();
-    ctx.fillStyle="#111";ctx.font="12px Arial";ctx.fillText(label,x+14,y-13);
+    ctx.fillStyle="#7a2ca8";ctx.font="12px Arial";ctx.fillText(label,x+14,y-13);
 }
 
 function drawSceneAt(seconds) {
