@@ -2670,29 +2670,56 @@ function worldToCanvas(model, canvas, x, y) {
 }
 
 function drawActorArrow(ctx,x,y,angle,length) {
-    // LOCKED / PROVEN existing HCW actor-facing convention from FIX110R2 / SD212:
-    // ACTOR_DIRECTION_SOURCE = HCW_RotatorCharacter
-    // ACTOR_DIRECTION_CONVENTION_WORLD_XY = (-cos(angle), +sin(angle))
-    // HCW->Background mapping already maps HCW +Y to image +Y (down),
-    // therefore NO additional sign conversion is allowed here.
-    const dx=-Math.cos(angle)*length, dy=Math.sin(angle)*length;
-    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y+dy);ctx.stroke();
-    const aa=Math.atan2(dy,dx);
+    // TEST 04 LOCK: the HCW RotatorCharacter angle is drawn directly
+    // as the radial line of the Shot Designer actor circle.
+    const dx=Math.cos(angle)*length;
+    const dy=Math.sin(angle)*length;
     ctx.beginPath();
-    ctx.moveTo(x+dx,y+dy);ctx.lineTo(x+dx-8*Math.cos(aa-.5),y+dy-8*Math.sin(aa-.5));
-    ctx.moveTo(x+dx,y+dy);ctx.lineTo(x+dx-8*Math.cos(aa+.5),y+dy-8*Math.sin(aa+.5));
+    ctx.moveTo(x,y);
+    ctx.lineTo(x+dx,y+dy);
     ctx.stroke();
 }
 
 function drawCameraSymbol(ctx,x,y,angle,label,isDolly) {
-    ctx.save(); ctx.translate(x,y);
-    // PROVEN HCW RotatorCamera convention: (cos(angle), sin(angle))
+    ctx.save();
+    ctx.translate(x,y);
     ctx.rotate(angle);
-    ctx.lineWidth=2; ctx.strokeStyle="#7a2ca8"; ctx.fillStyle="#fff";
-    ctx.strokeRect(-13,-9,22,18);
-    ctx.beginPath();ctx.moveTo(9,-6);ctx.lineTo(19,-11);ctx.lineTo(19,11);ctx.lineTo(9,6);ctx.closePath();ctx.stroke();
+
+    // TEST 04 LOCK: magenta filled film-camera graphic.
+    ctx.fillStyle="#ff4fc3";
+    ctx.strokeStyle="#111";
+    ctx.lineWidth=1.5;
+
+    // camera body
+    ctx.beginPath();
+    ctx.rect(-9,-7,18,14);
+    ctx.fill();
+    ctx.stroke();
+
+    // lens / hood
+    ctx.beginPath();
+    ctx.moveTo(9,-6);
+    ctx.lineTo(18,-11);
+    ctx.lineTo(18,11);
+    ctx.lineTo(9,6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // two reels
+    ctx.beginPath();
+    ctx.arc(-5,-12,4,0,Math.PI*2);
+    ctx.arc(5,-12,4,0,Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+
     ctx.restore();
-    ctx.fillStyle="#7a2ca8";ctx.font="12px Arial";ctx.fillText(label,x+14,y-13);
+
+    if(label){
+        ctx.fillStyle="#ff4fc3";
+        ctx.font="bold 12px Arial";
+        ctx.fillText(label,x+15,y-12);
+    }
 }
 
 function drawSceneAt(seconds) {
