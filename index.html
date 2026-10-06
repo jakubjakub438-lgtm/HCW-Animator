@@ -2719,7 +2719,8 @@ function drawCameraSymbol(ctx,x,y,angle,label,isDolly,colorIndex) {
     ctx.rotate(angle);
 
     // TEST 04 LOCK: magenta filled film-camera graphic.
-    const cameraColor=verifiedCameraSetColor(colorIndex);\n    ctx.fillStyle=cameraColor;
+    const cameraColor=verifiedCameraSetColor(colorIndex);
+    ctx.fillStyle=cameraColor;
     ctx.strokeStyle="#111";
     ctx.lineWidth=1.5;
 
