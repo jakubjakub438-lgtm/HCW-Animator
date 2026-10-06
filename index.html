@@ -2465,20 +2465,22 @@ function exactTrackPoints(track, members) {
 
 function cameraTrackPercent(camera, track) {
     const id=T(camera,"uniqueID");
+
+    // SOURCE 1: HCW Track explicitly defines its physical endpoints.
     if (id===T(track,"fromConstraints")) return 0;
     if (id===T(track,"toConstraints")) return 1;
 
-    const rawAbs=T(camera,"snapAbsolutePercent","");
-    if (rawAbs!=="") {
-        const v=Number(rawAbs);
-        if (Number.isFinite(v)) return v;
-    }
+    // SOURCE 2: existing verified universal HCW parser carries snapPercent
+    // for intermediate Dolly camera states. Do not substitute
+    // snapAbsolutePercent: in Pokus 23 HCW it is stored as 0 while the
+    // actual intermediate Dolly position is explicitly snapPercent=0.828017...
     const raw=T(camera,"snapPercent","");
     if (raw!=="") {
         const v=Number(raw);
         if (Number.isFinite(v)) return v;
     }
-    throw new Error(`STRICT HCW STOP — Camera ${id} je na Tracku, ale HCW neurčuje snapPercent/snapAbsolutePercent.`);
+
+    throw new Error(`STRICT HCW STOP — Camera ${id} je na Tracku, ale HCW neurčuje snapPercent.`);
 }
 
 function pointOnExactTrack(trackPoints, percent) {
@@ -2547,6 +2549,31 @@ async function makePlayerModel(data, actors, cameraData) {
             })
         };
     });
+
+    // STRICT DOLLY SEQUENCE AUDIT
+    // Order source = HCW sequence only. stopMarks is a label, never a sorter.
+    // Each move is between two consecutive active Dolly states in that HCW order.
+    for (const d of dollyTracks) {
+        const ordered = d.situations
+            .map((state, i) => state ? ({state, sequence:sequences[i]}) : null)
+            .filter(Boolean);
+
+        for (let i=0; i<ordered.length; i++) {
+            const cur = ordered[i];
+            if (!Number.isFinite(cur.state.trackPercent)) {
+                throw new Error(
+                    `STRICT HCW STOP — Dolly state ${cur.state.id} v sequence ${cur.sequence} nemá jednoznačnú pozíciu na Tracku.`
+                );
+            }
+            if (i>0 && cur.sequence <= ordered[i-1].sequence) {
+                throw new Error(
+                    `STRICT HCW STOP — poradie Dolly stavov nie je jednoznačné podľa HCW sequence.`
+                );
+            }
+        }
+
+        d.orderedHCWStates = ordered;
+    }
 
     const staticTracks = data.cameras
         .filter(c => !dollyCameraIDs.has(T(c,"uniqueID")))
@@ -2619,9 +2646,12 @@ function cameraPoseAt(track, phase) {
     if(!a) return null;
     if(!b) return a;
 
-    // Dolly: continuous movement only between two distinct HCW Dolly states.
-    // Start/end are the exact HCW camera states; the path is the exact HCW Track.
-    // No snapping to the target state before phase.p reaches 1.
+    // STRICT UNIVERSAL DOLLY RULE:
+    // a = active Dolly state at current HCW sequence
+    // b = active Dolly state at the immediately following HCW sequence
+    // Movement is ONLY a -> b, directly along their exact HCW Track interval.
+    // stopMarks never determines order and no other Dolly state may be inserted.
+    // Start/end are exact HCW camera states; no wrap-around and no detour.
     if (track.track && track.trackPoints) {
         const u=Math.max(0,Math.min(1,phase.p));
         const p=a.trackPercent+(b.trackPercent-a.trackPercent)*u;
@@ -2756,6 +2786,49 @@ function drawCameraSymbol(ctx,x,y,angle,label,isDolly,colorIndex) {
     }
 }
 
+function drawActorRoster(ctx, canvas, model) {
+    // SOURCE:
+    // name = existing verified HCW actor reconstruction
+    // color = HCW Character colorName in actor signature
+    // right-side placement = explicit user instruction
+    const actors=model.actorTracks||[];
+    if(!actors.length) return;
+
+    ctx.save();
+    ctx.font="bold 15px Arial";
+
+    let maxText=0;
+    for(const tr of actors) maxText=Math.max(maxText,ctx.measureText(tr.name).width);
+
+    const rowH=28, boxW=Math.max(150,maxText+58), boxH=18+actors.length*rowH+14;
+    const x=canvas.width-boxW-18, y=18;
+
+    ctx.fillStyle="rgba(255,255,255,.88)";
+    ctx.strokeStyle="#111";
+    ctx.lineWidth=1;
+    ctx.fillRect(x,y,boxW,boxH);
+    ctx.strokeRect(x,y,boxW,boxH);
+
+    actors.forEach((tr,i)=>{
+        const colorName=String(tr.actor.signature||"").split("|")[0];
+        if(!colorName) throw new Error(`STRICT HCW STOP — postava ${tr.name} nemá jednoznačný HCW colorName.`);
+
+        const cy=y+24+i*rowH;
+        ctx.fillStyle=colorName;
+        ctx.strokeStyle="#111";
+        ctx.lineWidth=1.5;
+        ctx.beginPath();
+        ctx.arc(x+20,cy,9,0,Math.PI*2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle="#111";
+        ctx.font="bold 15px Arial";
+        ctx.fillText(tr.name,x+38,cy+5);
+    });
+    ctx.restore();
+}
+
 function drawSceneAt(seconds) {
     const canvas=document.getElementById("sceneCanvas"), ctx=canvas.getContext("2d");
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -2812,6 +2885,9 @@ function drawSceneAt(seconds) {
         const pose=cameraPoseAt(c,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
         drawCameraSymbol(ctx,q.x,q.y,pose.angle,"",false,pose.colorIndex);
     }
+
+    // HCW actor roster is drawn into the same canvas, therefore it is also in exported video.
+    drawActorRoster(ctx,canvas,playerModel);
 
     ctx.fillStyle="#111";ctx.font="16px Arial";
     const phaseText=phase.moving?`POHYB ${Math.round(phase.p*100)} %`:`HOLD`;
