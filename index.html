@@ -52,6 +52,35 @@
     .error {
         color: #b00020;
     }
+
+
+    /* ========================================================
+       ANIMATION PLAYER — added above the existing LOCK parser
+       ======================================================== */
+    .player-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .player-controls button { margin-left: 0; }
+    .player-controls button:disabled { opacity: .45; cursor: not-allowed; }
+    #sceneCanvas {
+        display: block;
+        width: 100%;
+        max-width: 1280px;
+        aspect-ratio: 16 / 9;
+        background: #fff;
+        border: 1px solid #bbb;
+        border-radius: 6px;
+    }
+    #playerInfo {
+        margin-top: 10px;
+        font-family: monospace;
+        white-space: pre-wrap;
+    }
+
 </style>
 </head>
 
@@ -76,6 +105,19 @@
         Vyber HCW súbor.
     </div>
 
+</div>
+
+
+
+<div class="panel" id="animationPanel">
+    <div class="player-controls">
+        <button id="playButton" disabled>PLAY</button>
+        <button id="stopButton" disabled>STOP</button>
+        <button id="exportButton" disabled>EXPORT MP4</button>
+        <strong>LOCK: POHYB 1,5 s → HOLD 1,0 s</strong>
+    </div>
+    <canvas id="sceneCanvas" width="1280" height="720"></canvas>
+    <div id="playerInfo">Najprv otvor HCW súbor.</div>
 </div>
 
 <div class="panel">
@@ -2139,6 +2181,404 @@ function makeReport(
 
 /*
 ============================================================
+2D ANIMATION PLAYER + MP4 EXPORT
+============================================================
+
+LOCK:
+- Existing parser above is not replaced.
+- Every HCW situation transition lasts exactly 1.5 s.
+- Every reached situation holds exactly 1.0 s.
+- WalkArrow geometry is [FROM] + every stored Point + [TO].
+- Distance inside a WalkArrow is distributed by cumulative polyline length.
+- Same XY + changed active rotator = turn in place.
+- No actor/camera names or scene coordinates are hard-coded.
+============================================================
+*/
+
+const MOVE_SECONDS = 1.5;
+const HOLD_SECONDS = 1.0;
+const EXPORT_FPS = 24;
+
+let playerModel = null;
+let animationRAF = null;
+let animationStartMS = 0;
+let currentAnimationSeconds = 0;
+let isPlaying = false;
+let recordingState = null;
+
+function allRotators(element, subtag) {
+    const subObjects = directChild(element, "SubObjects");
+    if (!subObjects) return [];
+    return directChildren(subObjects, subtag).map(r => ({
+        id: T(r, "uniqueID"),
+        angle: F(r, "angle", 0)
+    }));
+}
+
+function detailedObjectEvents(element) {
+    const q = directChild(element, "ObjectEvents");
+    if (!q) return [];
+    return directChildren(q, "OnOffEvent").map(z => ({
+        sequence: parseInt(T(z, "sequence", "0"), 10) || 0,
+        active: T(z, "active", "false").toLowerCase() === "true",
+        disabledRotators: T(z, "disabledRotators", "")
+            .split(",").map(x => x.trim()).filter(Boolean)
+    })).sort((a,b) => a.sequence - b.sequence);
+}
+
+function latestEventAtOrBefore(element, sequence) {
+    let found = null;
+    for (const ev of detailedObjectEvents(element)) {
+        if (ev.sequence <= sequence) found = ev;
+        else break;
+    }
+    return found;
+}
+
+function activeAngleAtSequence(element, subtag, sequence) {
+    const rotators = allRotators(element, subtag);
+    if (rotators.length === 0) return 0;
+    const ev = latestEventAtOrBefore(element, sequence);
+    if (!ev) return rotators.length === 1 ? rotators[0].angle : null;
+    const disabled = new Set(ev.disabledRotators);
+    const enabled = rotators.filter(r => !disabled.has(r.id));
+    if (enabled.length === 1) return enabled[0].angle;
+    if (rotators.length === 1 && enabled.length === 1) return enabled[0].angle;
+    return null;
+}
+
+function stateIsActiveAtSequence(state, sequence) {
+    const ev = latestEventAtOrBefore(state, sequence);
+    return !!(ev && ev.active);
+}
+
+function actorSituationState(actor, sequence) {
+    const active = actor.states.filter(s => stateIsActiveAtSequence(s, sequence));
+    if (active.length === 0) return null;
+    if (active.length > 1) {
+        throw new Error(`Actor ${actor.name}: v situácii ${sequence} je aktívnych viac Character stavov.`);
+    }
+    const state = active[0];
+    const angle = activeAngleAtSequence(state, "RotatorCharacter", sequence);
+    if (angle === null) {
+        throw new Error(`Actor ${actor.name}: v situácii ${sequence} nie je jednoznačný aktívny RotatorCharacter.`);
+    }
+    return {
+        id: T(state, "uniqueID"),
+        x: F(state, "x"),
+        y: F(state, "y"),
+        angle,
+        colorName: T(state, "colorName", "Character"),
+        state
+    };
+}
+
+function cameraSituationState(camera, sequence) {
+    if (!stateIsActiveAtSequence(camera, sequence)) return null;
+    const angle = activeAngleAtSequence(camera, "RotatorCamera", sequence);
+    if (angle === null) {
+        throw new Error(`Camera ${T(camera,"uniqueID")}: v situácii ${sequence} nie je jednoznačný aktívny RotatorCamera.`);
+    }
+    return {
+        id: T(camera, "uniqueID"),
+        x: F(camera, "x"),
+        y: F(camera, "y"),
+        angle,
+        stopMarks: T(camera, "stopMarks", ""),
+        camera
+    };
+}
+
+function shortestAngleDelta(a, b) {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+}
+
+function lerpAngle(a, b, t) {
+    return a + shortestAngleDelta(a, b) * t;
+}
+
+function polylineMetrics(points) {
+    const cumulative = [0];
+    for (let i=1; i<points.length; i++) {
+        cumulative.push(cumulative[i-1] + Math.hypot(
+            points[i].x - points[i-1].x,
+            points[i].y - points[i-1].y
+        ));
+    }
+    return { cumulative, total: cumulative[cumulative.length-1] || 0 };
+}
+
+function pointOnPolyline(points, progress, endAngle, startAngle) {
+    if (!points || points.length === 0) return {x:0,y:0,angle:endAngle};
+    if (points.length === 1) return {x:points[0].x,y:points[0].y,angle:lerpAngle(startAngle,endAngle,progress)};
+    const m = polylineMetrics(points);
+    if (m.total === 0) {
+        return {x:points[0].x,y:points[0].y,angle:lerpAngle(startAngle,endAngle,progress)};
+    }
+    const target = Math.max(0, Math.min(1, progress)) * m.total;
+    let seg = points.length - 2;
+    for (let i=0; i<m.cumulative.length-1; i++) {
+        if (target <= m.cumulative[i+1]) { seg = i; break; }
+    }
+    const d0 = m.cumulative[seg], d1 = m.cumulative[seg+1];
+    const u = d1 === d0 ? 0 : (target-d0)/(d1-d0);
+    const a = points[seg], b = points[seg+1];
+    const angle = progress >= 1 ? endAngle : Math.atan2(b.y-a.y, b.x-a.x);
+    return {x:a.x+(b.x-a.x)*u, y:a.y+(b.y-a.y)*u, angle};
+}
+
+function findActorWalk(actor, fromID, toID, stateById) {
+    for (const walk of actor.walks) {
+        if (T(walk,"fromConstraints") === fromID && T(walk,"toConstraints") === toID) {
+            return walkPoints(walk, stateById);
+        }
+    }
+    return null;
+}
+
+function makePlayerModel(data, actors, cameraData) {
+    const sequences = [...data.sequences].sort((a,b)=>a-b);
+    if (sequences.length === 0) throw new Error("HCW neobsahuje žiadne situácie/sequence.");
+
+    const stateById = new Map(data.sceneStates.map(s => [T(s,"uniqueID"), s]));
+    const actorTracks = actors.map(actor => ({
+        name: actor.name,
+        situations: sequences.map(seq => actorSituationState(actor, seq)),
+        actor
+    }));
+
+    const trackById = new Map(data.tracks.map(t => [T(t,"uniqueID"), t]));
+    const dollyCameraIDs = new Set();
+    for (const tr of data.tracks) {
+        const tid = T(tr,"uniqueID");
+        const from = T(tr,"fromConstraints"), to = T(tr,"toConstraints");
+        if (from) dollyCameraIDs.add(from);
+        if (to) dollyCameraIDs.add(to);
+        for (const cam of data.cameras) if (T(cam,"snapPath") === tid) dollyCameraIDs.add(T(cam,"uniqueID"));
+    }
+
+    const dollyTracks = data.tracks.map((track, index) => {
+        const tid = T(track,"uniqueID");
+        const members = data.cameras.filter(c =>
+            T(c,"uniqueID") === T(track,"fromConstraints") ||
+            T(c,"uniqueID") === T(track,"toConstraints") ||
+            T(c,"snapPath") === tid
+        );
+        return {
+            name: `DOLLY_${index+1}`,
+            track,
+            members,
+            situations: sequences.map(seq => {
+                const active = members.map(c=>cameraSituationState(c,seq)).filter(Boolean);
+                if (active.length > 1) throw new Error(`Dolly ${index+1}: v situácii ${seq} je aktívnych viac kamerových stavov.`);
+                return active[0] || null;
+            })
+        };
+    });
+
+    const staticTracks = data.cameras
+        .filter(c => !dollyCameraIDs.has(T(c,"uniqueID")))
+        .map((camera,index) => ({
+            name:`STATIC_${index+1}`,
+            camera,
+            situations: sequences.map(seq => cameraSituationState(camera,seq))
+        }));
+
+    const worldPoints = [];
+    for (const a of actorTracks) for (const s of a.situations) if (s) worldPoints.push({x:s.x,y:s.y});
+    for (const a of actors) for (const w of a.walks) worldPoints.push(...walkPoints(w,stateById));
+    for (const c of data.cameras) worldPoints.push({x:F(c,"x"),y:F(c,"y")});
+    for (const tr of data.tracks) {
+        const P=directChild(tr,"Points");
+        if(P) for(const pt of directChildren(P,"Point")) worldPoints.push({x:F(pt,"x"),y:F(pt,"y")});
+    }
+    if (worldPoints.length===0) worldPoints.push({x:0,y:0},{x:1,y:1});
+    let minX=Math.min(...worldPoints.map(p=>p.x)), maxX=Math.max(...worldPoints.map(p=>p.x));
+    let minY=Math.min(...worldPoints.map(p=>p.y)), maxY=Math.max(...worldPoints.map(p=>p.y));
+    if(maxX===minX){maxX+=1;minX-=1;} if(maxY===minY){maxY+=1;minY-=1;}
+
+    const transitions = Math.max(0,sequences.length-1);
+    const totalSeconds = HOLD_SECONDS + transitions*(MOVE_SECONDS+HOLD_SECONDS);
+    return {data,actors,cameraData,sequences,stateById,actorTracks,dollyTracks,staticTracks,bounds:{minX,maxX,minY,maxY},totalSeconds};
+}
+
+function phaseAtTime(model, seconds) {
+    if (model.sequences.length === 1) return {index:0,nextIndex:0,moving:false,p:0,sequence:model.sequences[0]};
+    if (seconds < HOLD_SECONDS) return {index:0,nextIndex:0,moving:false,p:0,sequence:model.sequences[0]};
+    let t = seconds - HOLD_SECONDS;
+    for (let i=0;i<model.sequences.length-1;i++) {
+        if (t < MOVE_SECONDS) return {index:i,nextIndex:i+1,moving:true,p:t/MOVE_SECONDS,sequence:model.sequences[i]};
+        t -= MOVE_SECONDS;
+        if (t < HOLD_SECONDS) return {index:i+1,nextIndex:i+1,moving:false,p:0,sequence:model.sequences[i+1]};
+        t -= HOLD_SECONDS;
+    }
+    const last=model.sequences.length-1;
+    return {index:last,nextIndex:last,moving:false,p:0,sequence:model.sequences[last]};
+}
+
+function actorPoseAt(track, phase, model) {
+    const a=track.situations[phase.index];
+    const b=track.situations[phase.nextIndex];
+    if(!a && !b) return null;
+    if(!phase.moving) return b || a;
+    if(!a) return b;
+    if(!b) return a;
+    if(a.id===b.id && a.x===b.x && a.y===b.y) {
+        return {...a, angle:lerpAngle(a.angle,b.angle,phase.p)};
+    }
+    const points=findActorWalk(track.actor,a.id,b.id,model.stateById);
+    if(points) return {...b,...pointOnPolyline(points,phase.p,b.angle,a.angle)};
+    if(a.x===b.x && a.y===b.y) return {...b,x:a.x,y:a.y,angle:lerpAngle(a.angle,b.angle,phase.p)};
+    // A changed actor state without its HCW WalkArrow is not invented.
+    return phase.p < 1 ? a : b;
+}
+
+function cameraPoseAt(track, phase) {
+    const a=track.situations[phase.index], b=track.situations[phase.nextIndex];
+    if(!a && !b) return null;
+    if(!phase.moving) return b || a;
+    if(!a) return b; if(!b) return a;
+    return {
+        ...b,
+        x:a.x+(b.x-a.x)*phase.p,
+        y:a.y+(b.y-a.y)*phase.p,
+        angle:lerpAngle(a.angle,b.angle,phase.p)
+    };
+}
+
+function worldToCanvas(model,canvas,x,y) {
+    const pad=55, bw=model.bounds.maxX-model.bounds.minX, bh=model.bounds.maxY-model.bounds.minY;
+    const scale=Math.min((canvas.width-2*pad)/bw,(canvas.height-2*pad)/bh);
+    const usedW=bw*scale, usedH=bh*scale;
+    const ox=(canvas.width-usedW)/2, oy=(canvas.height-usedH)/2;
+    return {x:ox+(x-model.bounds.minX)*scale, y:canvas.height-(oy+(y-model.bounds.minY)*scale), scale};
+}
+
+function drawArrow(ctx,x,y,angle,length) {
+    const dx=Math.cos(angle)*length, dy=-Math.sin(angle)*length;
+    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y+dy);ctx.stroke();
+    const aa=Math.atan2(dy,dx);
+    ctx.beginPath();ctx.moveTo(x+dx,y+dy);ctx.lineTo(x+dx-8*Math.cos(aa-.5),y+dy-8*Math.sin(aa-.5));
+    ctx.moveTo(x+dx,y+dy);ctx.lineTo(x+dx-8*Math.cos(aa+.5),y+dy-8*Math.sin(aa+.5));ctx.stroke();
+}
+
+function drawCameraSymbol(ctx,x,y,angle,label,isDolly) {
+    ctx.save(); ctx.translate(x,y); ctx.rotate(-angle);
+    ctx.lineWidth=2; ctx.strokeStyle=isDolly?"#7a2ca8":"#222"; ctx.fillStyle="#fff";
+    ctx.strokeRect(-13,-9,22,18);
+    ctx.beginPath();ctx.moveTo(9,-6);ctx.lineTo(19,-11);ctx.lineTo(19,11);ctx.lineTo(9,6);ctx.closePath();ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle="#111";ctx.font="12px Arial";ctx.fillText(label,x+14,y-13);
+}
+
+function drawSceneAt(seconds) {
+    const canvas=document.getElementById("sceneCanvas"), ctx=canvas.getContext("2d");
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(!playerModel) return;
+    const phase=phaseAtTime(playerModel,Math.max(0,Math.min(seconds,playerModel.totalSeconds)));
+
+    // Dolly track lines from exact HCW Track Points; if Track has no stored polyline, use from/to camera positions.
+    for(const d of playerModel.dollyTracks){
+        let pts=[]; const P=directChild(d.track,"Points");
+        if(P) pts=directChildren(P,"Point").map(p=>({x:F(p,"x"),y:F(p,"y")}));
+        if(pts.length<2){
+            const a=d.members.find(c=>T(c,"uniqueID")===T(d.track,"fromConstraints"));
+            const b=d.members.find(c=>T(c,"uniqueID")===T(d.track,"toConstraints"));
+            if(a&&b) pts=[{x:F(a,"x"),y:F(a,"y")},{x:F(b,"x"),y:F(b,"y")}];
+        }
+        if(pts.length>=2){ctx.strokeStyle="#8a5aa5";ctx.lineWidth=2;ctx.beginPath();pts.forEach((p,i)=>{const q=worldToCanvas(playerModel,canvas,p.x,p.y);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});ctx.stroke();}
+    }
+
+    for(const tr of playerModel.actorTracks){
+        const pose=actorPoseAt(tr,phase,playerModel); if(!pose) continue;
+        const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
+        ctx.fillStyle=pose.colorName||"#888"; ctx.strokeStyle="#111";ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(q.x,q.y,11,0,Math.PI*2);ctx.fill();ctx.stroke();
+        drawArrow(ctx,q.x,q.y,pose.angle,27);
+        ctx.fillStyle="#111";ctx.font="13px Arial";ctx.fillText(tr.name,q.x+15,q.y+18);
+    }
+
+    for(const d of playerModel.dollyTracks){
+        const pose=cameraPoseAt(d,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
+        drawCameraSymbol(ctx,q.x,q.y,pose.angle,pose.stopMarks?`${d.name} ${pose.stopMarks}`:d.name,true);
+    }
+    for(const c of playerModel.staticTracks){
+        const pose=cameraPoseAt(c,phase);if(!pose)continue;const q=worldToCanvas(playerModel,canvas,pose.x,pose.y);
+        drawCameraSymbol(ctx,q.x,q.y,pose.angle,c.name,false);
+    }
+
+    ctx.fillStyle="#111";ctx.font="16px Arial";
+    const phaseText=phase.moving?`POHYB ${Math.round(phase.p*100)} %`:`HOLD`;
+    ctx.fillText(`Situácia ${phase.sequence}   ${phaseText}   ${seconds.toFixed(2)} s / ${playerModel.totalSeconds.toFixed(2)} s`,18,28);
+    document.getElementById("playerInfo").textContent=`Situácia ${phase.sequence} | ${phaseText} | ${seconds.toFixed(2)} / ${playerModel.totalSeconds.toFixed(2)} s`;
+}
+
+function stopPlayback(reset=true) {
+    if(animationRAF) cancelAnimationFrame(animationRAF); animationRAF=null; isPlaying=false;
+    if(reset){currentAnimationSeconds=0;drawSceneAt(0);}
+    document.getElementById("playButton").textContent="PLAY";
+}
+
+function startPlayback(fromSeconds=0) {
+    if(!playerModel)return; stopPlayback(false); isPlaying=true; currentAnimationSeconds=fromSeconds;
+    animationStartMS=performance.now()-fromSeconds*1000; document.getElementById("playButton").textContent="PAUZA";
+    const tick=now=>{
+        if(!isPlaying)return;
+        currentAnimationSeconds=(now-animationStartMS)/1000;
+        if(currentAnimationSeconds>=playerModel.totalSeconds){currentAnimationSeconds=playerModel.totalSeconds;drawSceneAt(currentAnimationSeconds);isPlaying=false;document.getElementById("playButton").textContent="PLAY";return;}
+        drawSceneAt(currentAnimationSeconds); animationRAF=requestAnimationFrame(tick);
+    };
+    animationRAF=requestAnimationFrame(tick);
+}
+
+function preferredMP4Mime() {
+    const candidates=["video/mp4;codecs=avc1.42E01E","video/mp4;codecs=avc1","video/mp4"];
+    if(typeof MediaRecorder==="undefined") return null;
+    return candidates.find(x=>MediaRecorder.isTypeSupported(x))||null;
+}
+
+async function exportMP4() {
+    if(!playerModel)return;
+    const mime=preferredMP4Mime();
+    if(!mime){
+        status.className="error";
+        status.textContent="Tento prehliadač nepodporuje priamy MP4 záznam Canvasu cez MediaRecorder. HCW animácia zostáva funkčná; MP4 export vyžaduje prehliadač s video/mp4 MediaRecorder podporou.";
+        return;
+    }
+    stopPlayback(false);
+    const canvas=document.getElementById("sceneCanvas"), stream=canvas.captureStream(EXPORT_FPS);
+    const chunks=[]; const recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8000000});
+    recordingState=recorder;
+    recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+    recorder.onerror=e=>{status.className="error";status.textContent="CHYBA MP4: "+(e.error?.message||e.message||"MediaRecorder")};
+    recorder.onstop=()=>{
+        const blob=new Blob(chunks,{type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement("a");
+        a.href=url; a.download="HCW_Animator.mp4"; document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+        status.className="ok";status.textContent="MP4 video exportované."; recordingState=null;
+    };
+    status.className="";status.textContent="Exportujem MP4 video v reálnom čase…"; recorder.start(1000);
+    animationStartMS=performance.now(); isPlaying=true; currentAnimationSeconds=0;
+    const tick=now=>{
+        currentAnimationSeconds=(now-animationStartMS)/1000;
+        if(currentAnimationSeconds>=playerModel.totalSeconds){currentAnimationSeconds=playerModel.totalSeconds;drawSceneAt(currentAnimationSeconds);isPlaying=false;setTimeout(()=>recorder.stop(),150);return;}
+        drawSceneAt(currentAnimationSeconds);animationRAF=requestAnimationFrame(tick);
+    };
+    animationRAF=requestAnimationFrame(tick);
+}
+
+function installPlayerModel(data,actors,cameraData) {
+    playerModel=makePlayerModel(data,actors,cameraData); currentAnimationSeconds=0;
+    document.getElementById("playButton").disabled=false;
+    document.getElementById("stopButton").disabled=false;
+    document.getElementById("exportButton").disabled=false;
+    drawSceneAt(0);
+}
+
+/*
+============================================================
 MAIN
 ============================================================
 */
@@ -2166,6 +2606,26 @@ const output =
     document.getElementById(
         "output"
     );
+
+const playButton = document.getElementById("playButton");
+const stopButton = document.getElementById("stopButton");
+const exportButton = document.getElementById("exportButton");
+
+playButton.addEventListener("click", () => {
+    if (!playerModel) return;
+    if (isPlaying) {
+        if (animationRAF) cancelAnimationFrame(animationRAF);
+        animationRAF = null;
+        isPlaying = false;
+        playButton.textContent = "PLAY";
+    } else {
+        if (currentAnimationSeconds >= playerModel.totalSeconds) currentAnimationSeconds = 0;
+        startPlayback(currentAnimationSeconds);
+    }
+});
+
+stopButton.addEventListener("click", () => stopPlayback(true));
+exportButton.addEventListener("click", exportMP4);
 
 
 openButton.addEventListener(
@@ -2258,6 +2718,14 @@ openButton.addEventListener(
                 buildCameraData(
                     data
                 );
+
+
+            /* Existing parser data -> universal 2D animation model. */
+            installPlayerModel(
+                data,
+                actors,
+                cameraData
+            );
 
 
             /*
