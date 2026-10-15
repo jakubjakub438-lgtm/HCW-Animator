@@ -2331,6 +2331,19 @@ function pointOnPolyline(points, progress, endAngle, startAngle) {
     return {x:a.x+(b.x-a.x)*u, y:a.y+(b.y-a.y)*u, angle};
 }
 
+// HCW WalkArrow with exactly two stored interior points: evaluate the
+// four-point cubic curve rather than forcing travel THROUGH its handles.
+// This is a targeted interpretation pending verification against Shot Designer.
+function pointOnCubicWalk(points, progress, endAngle, startAngle) {
+    if (points.length !== 4) return pointOnPolyline(points, progress, endAngle, startAngle);
+    const t = Math.max(0, Math.min(1, progress));
+    const u = 1 - t;
+    const [a,c1,c2,b] = points;
+    const x = u*u*u*a.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*b.x;
+    const y = u*u*u*a.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*b.y;
+    return {x,y,angle:lerpAngle(startAngle,endAngle,t)};
+}
+
 function findActorWalk(actor, fromID, toID, stateById) {
     for (const walk of actor.walks) {
         if (T(walk,"fromConstraints") === fromID && T(walk,"toConstraints") === toID) {
@@ -2397,10 +2410,8 @@ function backgroundCorners(bg) {
 function strictHCWAudit(data, actors) {
     const problems = [];
 
-    // GenericProp and GenericLight are valid HCW scene objects.
-    // Their presence or count must NEVER block the 2D actor/camera animation.
-    // This renderer does not yet draw those object classes; do not invent graphics.
-    // Keep all other existing HCW consistency checks unchanged.
+    // HCW GenericProp and GenericLight must never block playback.
+    // Preserve the existing actor/camera animation unchanged.
 
     const stateById = new Map(data.sceneStates.map(s => [T(s,"uniqueID"), s]));
 
@@ -2582,6 +2593,7 @@ async function makePlayerModel(data, actors, cameraData) {
     worldPoints.push(...backgroundCorners(hcwBackground));
     for (const a of actorTracks) for (const s of a.situations) if (s) worldPoints.push({x:s.x,y:s.y});
     for (const a of actors) for (const w of a.walks) worldPoints.push(...walkPoints(w,stateById));
+    for (const prop of data.props) worldPoints.push({x:F(prop,"x"),y:F(prop,"y")});
     for (const c of data.cameras) worldPoints.push({x:F(c,"x"),y:F(c,"y")});
     for (const tr of data.tracks) {
         const P=directChild(tr,"Points");
@@ -2618,15 +2630,12 @@ function actorPoseAt(track, phase, model) {
     if(!phase.moving) return b || a;
     if(!a) return b;
     if(!b) return a;
-    // HCW LOCK: if the two active Character states have identical XY,
-    // the actor remains at that exact location. Do not animate a WalkArrow
-    // detour even if a graph edge connects the states.
-    if(a.x===b.x && a.y===b.y) {
-        return {...b,x:a.x,y:a.y,angle:lerpAngle(a.angle,b.angle,phase.p)};
+    if(a.id===b.id && a.x===b.x && a.y===b.y) {
+        return {...a, angle:lerpAngle(a.angle,b.angle,phase.p)};
     }
-    // Only an explicit HCW WalkArrow can move the actor between distinct XY.
     const points=findActorWalk(track.actor,a.id,b.id,model.stateById);
-    if(points) return {...b,...pointOnPolyline(points,phase.p,b.angle,a.angle)};
+    if(points) return {...b,...pointOnCubicWalk(points,phase.p,b.angle,a.angle)};
+    if(a.x===b.x && a.y===b.y) return {...b,x:a.x,y:a.y,angle:lerpAngle(a.angle,b.angle,phase.p)};
     // A changed actor state without its HCW WalkArrow is not invented.
     return phase.p < 1 ? a : b;
 }
@@ -2847,6 +2856,24 @@ function drawSceneAt(seconds) {
         ctx.strokeStyle=verifiedCameraSetColor(d.colorIndex);ctx.lineWidth=2;ctx.beginPath();
         pts.forEach((p,i)=>{const q=worldToCanvas(playerModel,canvas,p.x,p.y);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});
         ctx.stroke();
+    }
+
+    // HCW props: display stored objectKey at its exact HCW XY.
+    // This is an identification marker, NOT a fabricated Shot Designer silhouette.
+    for (const prop of playerModel.data.props) {
+        const key=T(prop,"objectKey","");
+        const pos=worldToCanvas(playerModel,canvas,F(prop,"x"),F(prop,"y"));
+        const angle=angleOf(prop,"RotatorObject");
+        ctx.save();
+        ctx.translate(pos.x,pos.y);
+        ctx.rotate(angle);
+        ctx.fillStyle="#222";
+        ctx.strokeStyle="#222";
+        ctx.lineWidth=1;
+        ctx.beginPath(); ctx.arc(0,0,3,0,Math.PI*2); ctx.fill();
+        ctx.font="12px Arial";
+        ctx.fillText(key || "GenericProp",7,-6);
+        ctx.restore();
     }
 
     // HCW captions: exact stored XY and text. No relocation.
