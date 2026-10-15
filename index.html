@@ -2397,14 +2397,10 @@ function backgroundCorners(bg) {
 function strictHCWAudit(data, actors) {
     const problems = [];
 
-    // The current renderer has no proven HCW visual transcription for these object classes.
-    // STRICT rule: stop instead of inventing a symbol/shape.
-    if (data.props.length > 0) {
-        problems.push(`GenericProp=${data.props.length}: vizuálny tvar GenericProp nie je v tejto verzii 100 % overene prenesený.`);
-    }
-    if (data.lights.length > 0) {
-        problems.push(`GenericLight=${data.lights.length}: vizuálny tvar GenericLight nie je v tejto verzii 100 % overene prenesený.`);
-    }
+    // GenericProp and GenericLight are valid HCW scene objects.
+    // Their presence or count must NEVER block the 2D actor/camera animation.
+    // This renderer does not yet draw those object classes; do not invent graphics.
+    // Keep all other existing HCW consistency checks unchanged.
 
     const stateById = new Map(data.sceneStates.map(s => [T(s,"uniqueID"), s]));
 
@@ -2622,12 +2618,15 @@ function actorPoseAt(track, phase, model) {
     if(!phase.moving) return b || a;
     if(!a) return b;
     if(!b) return a;
-    if(a.id===b.id && a.x===b.x && a.y===b.y) {
-        return {...a, angle:lerpAngle(a.angle,b.angle,phase.p)};
+    // HCW LOCK: if the two active Character states have identical XY,
+    // the actor remains at that exact location. Do not animate a WalkArrow
+    // detour even if a graph edge connects the states.
+    if(a.x===b.x && a.y===b.y) {
+        return {...b,x:a.x,y:a.y,angle:lerpAngle(a.angle,b.angle,phase.p)};
     }
+    // Only an explicit HCW WalkArrow can move the actor between distinct XY.
     const points=findActorWalk(track.actor,a.id,b.id,model.stateById);
     if(points) return {...b,...pointOnPolyline(points,phase.p,b.angle,a.angle)};
-    if(a.x===b.x && a.y===b.y) return {...b,x:a.x,y:a.y,angle:lerpAngle(a.angle,b.angle,phase.p)};
     // A changed actor state without its HCW WalkArrow is not invented.
     return phase.p < 1 ? a : b;
 }
